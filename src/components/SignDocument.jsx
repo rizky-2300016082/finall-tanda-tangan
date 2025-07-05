@@ -28,20 +28,30 @@ const SignDocument = () => {
 
   const loadDocument = async () => {
     try {
+      console.log('Loading document with ID:', documentId)
+      
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('*')
         .eq('public_link', documentId)
         .single()
 
-      if (docError) throw docError
+      if (docError) {
+        console.error('Database error:', docError)
+        throw docError
+      }
+      
+      console.log('Document data:', docData)
       setDocument(docData)
 
       const { data: fileData, error: fileError } = await supabase.storage
         .from('documents')
         .download(docData.file_path)
 
-      if (fileError) throw fileError
+      if (fileError) {
+        console.error('Storage error:', fileError)
+        throw fileError
+      }
 
       const arrayBuffer = await fileData.arrayBuffer()
       const bytes = new Uint8Array(arrayBuffer)
@@ -56,26 +66,36 @@ const SignDocument = () => {
       setLoading(false)
     } catch (error) {
       console.error('Error loading document:', error)
+      alert('Error loading document. Please check if the link is valid.')
       setLoading(false)
     }
   }
 
   const renderPage = async (pageIndex, bytes = pdfBytes) => {
-    if (!bytes) return
+    if (!bytes) {
+      console.log('No bytes available for rendering')
+      return
+    }
+
+    const canvas = canvasRef.current
+    if (!canvas) {
+      console.log('Canvas not available')
+      return
+    }
 
     try {
       // Use PDF.js for rendering
       const pdfjsLib = window.pdfjsLib
       if (!pdfjsLib) {
-        // Fallback to simple PDF display
+        console.log('PDF.js not available, using fallback')
         renderSimplePage(pageIndex)
         return
       }
 
+      console.log('Rendering page with PDF.js:', pageIndex + 1)
       const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
       const page = await pdf.getPage(pageIndex + 1)
       
-      const canvas = canvasRef.current
       const ctx = canvas.getContext('2d')
       
       const viewport = page.getViewport({ scale: 1.5 })
@@ -90,6 +110,7 @@ const SignDocument = () => {
       }
       
       await page.render(renderContext).promise
+      console.log('Page rendered successfully')
     } catch (error) {
       console.error('Error rendering PDF with PDF.js:', error)
       renderSimplePage(pageIndex)
@@ -345,7 +366,8 @@ const SignDocument = () => {
     <div className="sign-document">
       <header className="sign-header">
         <h1>Sign Document: {document.filename}</h1>
-        <p>Requested by: {document.recipient_email}</p>
+        <p>Recipient: {document.recipient_email}</p>
+        <p>Document sent by sender</p>
       </header>
 
       <div className="sign-content">

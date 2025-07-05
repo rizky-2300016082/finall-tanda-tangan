@@ -2,6 +2,9 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../config/supabase'
 
+import React, { createContext, useContext, useState, useEffect } from 'react'
+import { supabase } from '../config/supabase'
+
 const AuthContext = createContext()
 
 export const useAuth = () => {

@@ -33,10 +33,13 @@ CREATE POLICY "Users can update their own documents" ON documents
   FOR UPDATE USING (auth.uid() = sender_id);
 
 CREATE POLICY "Anyone can view documents with public link" ON documents
-  FOR SELECT USING (public_link IS NOT NULL);
+  FOR SELECT USING (public_link IS NOT NULL AND status IN ('sent', 'signed'));
 
 CREATE POLICY "Anyone can update documents for signing" ON documents
   FOR UPDATE USING (public_link IS NOT NULL AND status = 'sent');
+
+CREATE POLICY "Delete own documents" ON documents
+  FOR DELETE USING (auth.uid() = sender_id);
 
 -- Create storage bucket for documents
 INSERT INTO storage.buckets (id, name, public) VALUES ('documents', 'documents', false);
