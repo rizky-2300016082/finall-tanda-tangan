@@ -82,11 +82,11 @@ const Dashboard = () => {
     navigate('/login')
   }
 
-  const downloadDocument = async (document) => {
+  const downloadDocument = async (doc) => {
     try {
-      console.log('Downloading document:', document.filename)
+      console.log('Downloading document:', doc.filename)
       
-      const filePath = document.signed_file_path || document.file_path
+      const filePath = doc.signed_file_path || doc.file_path
       console.log('File path:', filePath)
       
       const { data, error } = await supabase.storage
@@ -107,7 +107,7 @@ const Dashboard = () => {
       const url = URL.createObjectURL(data)
       const a = document.createElement('a')
       a.href = url
-      a.download = document.signed_file_path ? `signed_${document.filename}` : document.filename
+      a.download = doc.signed_file_path ? `signed_${doc.filename}` : doc.filename
       a.style.display = 'none'
       document.body.appendChild(a)
       a.click()
@@ -121,19 +121,19 @@ const Dashboard = () => {
     }
   }
 
-  const deleteDocument = async (document) => {
-    if (!confirm(`Are you sure you want to delete "${document.filename}"?`)) {
+  const deleteDocument = async (doc) => {
+    if (!confirm(`Are you sure you want to delete "${doc.filename}"?`)) {
       return
     }
 
     try {
-      console.log('Deleting document:', document.id)
+      console.log('Deleting document:', doc.id)
       
       // Delete from database first
       const { error: dbError } = await supabase
         .from('documents')
         .delete()
-        .eq('id', document.id)
+        .eq('id', doc.id)
         .eq('sender_id', user.id) // Add security check
 
       if (dbError) {
@@ -147,17 +147,17 @@ const Dashboard = () => {
       try {
         const { error: storageError } = await supabase.storage
           .from('documents')
-          .remove([document.file_path])
+          .remove([doc.file_path])
 
         if (storageError) {
           console.error('Storage delete error for main file:', storageError)
         }
 
         // Delete signed file if exists
-        if (document.signed_file_path) {
+        if (doc.signed_file_path) {
           const { error: signedFileError } = await supabase.storage
             .from('documents')
-            .remove([document.signed_file_path])
+            .remove([doc.signed_file_path])
 
           if (signedFileError) {
             console.error('Storage delete error for signed file:', signedFileError)

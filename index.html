@@ -7,6 +7,17 @@
     <title>Document Signature Manager</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
+      // Set up PDF.js worker as soon as the library loads
+      window.addEventListener('load', function() {
+        if (typeof window !== 'undefined' && window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          console.log('PDF.js worker configured');
+        } else {
+          console.warn('PDF.js not loaded properly');
+        }
+      });
+      
+      // Backup worker configuration
       if (typeof window !== 'undefined' && window.pdfjsLib) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
       }

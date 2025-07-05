@@ -23,6 +23,10 @@ const SignDocument = () => {
   const [scale, setScale] = useState(1)
 
   useEffect(() => {
+    // Initialize PDF.js worker
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+    }
     loadDocument()
   }, [documentId])
 
@@ -81,14 +85,21 @@ const SignDocument = () => {
         throw new Error('Invalid PDF file')
       }
       
-      await renderPage(0, bytes)
-      setupSignatureCanvas()
+      // Wait a bit before rendering to ensure canvas is ready
+      setTimeout(async () => {
+        try {
+          await renderPage(0, bytes)
+          setupSignatureCanvas()
+        } catch (renderError) {
+          console.error('Error rendering page:', renderError)
+        }
+      }, 100)
+      
       setLoading(false)
     } catch (error) {
       console.error('Error loading document:', error)
       setDocument(null)
       setLoading(false)
-      // Don't show alert immediately, let the component render the error state
     }
   }
 
@@ -114,6 +125,11 @@ const SignDocument = () => {
       }
 
       console.log('Rendering page with PDF.js:', pageIndex + 1)
+      
+      // Ensure PDF.js worker is set
+      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+      }
       
       // Load PDF document
       const loadingTask = pdfjsLib.getDocument({ 
