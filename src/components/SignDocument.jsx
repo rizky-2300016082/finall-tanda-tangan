@@ -11,6 +11,7 @@ const SignDocument = () => {
   const signatureCanvasRef = useRef(null)
   const [document, setDocument] = useState(null)
   const [pdfDoc, setPdfDoc] = useState(null)
+  const [pdfBytes, setPdfBytes] = useState(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [signatureMode, setSignatureMode] = useState('draw')
@@ -19,6 +20,7 @@ const SignDocument = () => {
   const [isDrawing, setIsDrawing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [signing, setSigning] = useState(false)
+  const [scale, setScale] = useState(1)
 
   useEffect(() => {
     loadDocument()
@@ -42,11 +44,14 @@ const SignDocument = () => {
       if (fileError) throw fileError
 
       const arrayBuffer = await fileData.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+      setPdfBytes(bytes)
+      
       const pdf = await PDFDocument.load(arrayBuffer)
       setPdfDoc(pdf)
       setTotalPages(pdf.getPageCount())
       
-      await renderPage(0, pdf)
+      await renderPage(0, bytes)
       setupSignatureCanvas()
       setLoading(false)
     } catch (error) {
@@ -55,32 +60,73 @@ const SignDocument = () => {
     }
   }
 
-  const renderPage = async (pageIndex, pdf = pdfDoc) => {
-    if (!pdf) return
+  const renderPage = async (pageIndex, bytes = pdfBytes) => {
+    if (!bytes) return
 
-    const page = pdf.getPage(pageIndex)
-    const { width, height } = page.getSize()
-    
+    try {
+      // Use PDF.js for rendering
+      const pdfjsLib = window.pdfjsLib
+      if (!pdfjsLib) {
+        // Fallback to simple PDF display
+        renderSimplePage(pageIndex)
+        return
+      }
+
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+      const page = await pdf.getPage(pageIndex + 1)
+      
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext('2d')
+      
+      const viewport = page.getViewport({ scale: 1.5 })
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      
+      setScale(1.5)
+      
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+      }
+      
+      await page.render(renderContext).promise
+    } catch (error) {
+      console.error('Error rendering PDF with PDF.js:', error)
+      renderSimplePage(pageIndex)
+    }
+  }
+
+  const renderSimplePage = (pageIndex) => {
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     
-    const scale = Math.min(800 / width, 600 / height)
-    canvas.width = width * scale
-    canvas.height = height * scale
+    canvas.width = 800
+    canvas.height = 1000
+    setScale(1)
     
     ctx.fillStyle = 'white'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    ctx.fillStyle = '#f8f9fa'
+    ctx.fillRect(20, 20, canvas.width - 40, canvas.height - 40)
+    
     ctx.fillStyle = 'black'
-    ctx.font = '16px Arial'
+    ctx.font = '24px Arial'
     ctx.textAlign = 'center'
-    ctx.fillText(`Page ${pageIndex + 1} of ${totalPages}`, canvas.width / 2, 30)
+    ctx.fillText(`PDF Page ${pageIndex + 1}`, canvas.width / 2, 60)
+    
+    ctx.font = '16px Arial'
+    ctx.fillText('Please create your signature and submit', canvas.width / 2, 100)
     
     ctx.strokeStyle = '#ddd'
+    ctx.lineWidth = 2
     ctx.strokeRect(0, 0, canvas.width, canvas.height)
   }
 
   const setupSignatureCanvas = () => {
     const canvas = signatureCanvasRef.current
+    if (!canvas) return
+    
     canvas.width = 400
     canvas.height = 150
     const ctx = canvas.getContext('2d')
@@ -161,15 +207,45 @@ const SignDocument = () => {
     }
   }, [signatureText, signatureMode])
 
+  const hasValidSignature = () => {
+    if (signatureMode === 'draw') {
+      const canvas = signatureCanvasRef.current
+      const ctx = canvas.getContext('2d')
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const data = imageData.data
+      
+      // Check if canvas has any non-white pixels (indicating drawing)
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] !== 255 || data[i + 1] !== 255 || data[i + 2] !== 255) {
+          return true
+        }
+      }
+      return false
+    } else if (signatureMode === 'type') {
+      return signatureText.trim().length > 0
+    } else if (signatureMode === 'upload') {
+      return signatureImage !== null
+    }
+    return false
+  }
+
   const submitSignature = async () => {
-    if (!document || !pdfDoc) return
+    if (!document || !pdfDoc) {
+      alert('Document not loaded properly')
+      return
+    }
+
+    if (!hasValidSignature()) {
+      alert('Please create a signature first')
+      return
+    }
 
     setSigning(true)
     try {
       let signatureDataUrl = ''
       
       if (signatureMode === 'draw' || signatureMode === 'type') {
-        signatureDataUrl = signatureCanvasRef.current.toDataURL()
+        signatureDataUrl = signatureCanvasRef.current.toDataURL('image/png')
       } else if (signatureMode === 'upload' && signatureImage) {
         signatureDataUrl = signatureImage
       }
@@ -180,16 +256,38 @@ const SignDocument = () => {
         return
       }
 
+      // Load the original PDF document
       const pdfDocCopy = await PDFDocument.load(await pdfDoc.save())
       
       const signatureAreas = document.signature_areas || []
       
+      if (signatureAreas.length === 0) {
+        alert('No signature areas found in this document')
+        setSigning(false)
+        return
+      }
+
+      // Convert signature image to PNG bytes
+      const response = await fetch(signatureDataUrl)
+      const signatureBytes = await response.arrayBuffer()
+      
+      let signatureImageEmbed
+      try {
+        // Try PNG first
+        signatureImageEmbed = await pdfDocCopy.embedPng(signatureBytes)
+      } catch (error) {
+        try {
+          // If PNG fails, try JPG
+          signatureImageEmbed = await pdfDocCopy.embedJpg(signatureBytes)
+        } catch (error) {
+          throw new Error('Failed to embed signature image')
+        }
+      }
+      
+      // Apply signature to all designated areas
       for (const area of signatureAreas) {
         const page = pdfDocCopy.getPage(area.page)
         const { width, height } = page.getSize()
-        
-        const signatureBytes = await fetch(signatureDataUrl).then(res => res.arrayBuffer())
-        const signatureImageEmbed = await pdfDocCopy.embedPng(signatureBytes)
         
         const signatureWidth = width * area.width
         const signatureHeight = height * area.height
@@ -210,7 +308,8 @@ const SignDocument = () => {
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
         .upload(`signed/${signedFileName}`, signedPdfBytes, {
-          contentType: 'application/pdf'
+          contentType: 'application/pdf',
+          upsert: true
         })
 
       if (uploadError) throw uploadError
@@ -226,17 +325,17 @@ const SignDocument = () => {
 
       if (updateError) throw updateError
 
-      alert('Document signed successfully!')
+      alert('Document signed successfully! You can now close this window.')
       
     } catch (error) {
       console.error('Error signing document:', error)
-      alert('Error signing document')
+      alert(`Error signing document: ${error.message}`)
     } finally {
       setSigning(false)
     }
   }
 
-  if (loading) return <div className="loading">Loading...</div>
+  if (loading) return <div className="loading">Loading document...</div>
 
   if (!document) {
     return <div className="error">Document not found or link has expired.</div>
@@ -321,6 +420,7 @@ const SignDocument = () => {
 
           {signatureMode === 'draw' && (
             <div className="signature-draw">
+              <p className="instruction">Draw your signature in the box below:</p>
               <canvas
                 ref={signatureCanvasRef}
                 onMouseDown={startDrawing}
@@ -334,6 +434,7 @@ const SignDocument = () => {
 
           {signatureMode === 'type' && (
             <div className="signature-type">
+              <p className="instruction">Type your signature:</p>
               <input
                 type="text"
                 value={signatureText}
@@ -347,6 +448,7 @@ const SignDocument = () => {
 
           {signatureMode === 'upload' && (
             <div className="signature-upload">
+              <p className="instruction">Upload your signature image:</p>
               <label className="upload-signature-btn">
                 <Upload size={20} />
                 Upload Signature Image
@@ -369,11 +471,11 @@ const SignDocument = () => {
             </button>
             <button
               onClick={submitSignature}
-              disabled={signing}
+              disabled={signing || !hasValidSignature()}
               className="submit-signature-btn"
             >
               <Save size={16} />
-              {signing ? 'Signing...' : 'Submit Signature'}
+              {signing ? 'Submitting...' : 'Submit Signature'}
             </button>
           </div>
         </div>

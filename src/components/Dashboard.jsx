@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../config/supabase'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileText, Download, LogOut } from 'lucide-react'
+import { Upload, FileText, Download, LogOut, Trash2 } from 'lucide-react'
 
 const Dashboard = () => {
   const { user, signOut } = useAuth()
@@ -95,6 +95,43 @@ const Dashboard = () => {
     }
   }
 
+  const deleteDocument = async (document) => {
+    if (!confirm(`Are you sure you want to delete "${document.filename}"?`)) {
+      return
+    }
+
+    try {
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('documents')
+        .remove([document.file_path])
+
+      if (storageError) throw storageError
+
+      // Delete signed file if exists
+      if (document.signed_file_path) {
+        await supabase.storage
+          .from('documents')
+          .remove([document.signed_file_path])
+      }
+
+      // Delete from database
+      const { error: dbError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', document.id)
+
+      if (dbError) throw dbError
+
+      // Refresh the documents list
+      fetchDocuments()
+      alert('Document deleted successfully')
+    } catch (error) {
+      console.error('Error deleting document:', error)
+      alert('Error deleting document')
+    }
+  }
+
   return (
     <div className="dashboard">
       <header className="dashboard-header">
@@ -171,6 +208,13 @@ const Dashboard = () => {
                         Download
                       </button>
                     )}
+                    <button
+                      onClick={() => deleteDocument(doc)}
+                      className="delete-btn"
+                    >
+                      <Trash2 size={16} />
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}

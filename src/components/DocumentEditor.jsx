@@ -11,12 +11,14 @@ const DocumentEditor = () => {
   const canvasRef = useRef(null)
   const [document, setDocument] = useState(null)
   const [pdfDoc, setPdfDoc] = useState(null)
+  const [pdfBytes, setPdfBytes] = useState(null)
   const [currentPage, setCurrentPage] = useState(0)
   const [totalPages, setTotalPages] = useState(0)
   const [recipientEmail, setRecipientEmail] = useState('')
   const [signatureAreas, setSignatureAreas] = useState([])
   const [isPlacingSignature, setIsPlacingSignature] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [scale, setScale] = useState(1)
 
   useEffect(() => {
     loadDocument()
@@ -40,11 +42,14 @@ const DocumentEditor = () => {
       if (fileError) throw fileError
 
       const arrayBuffer = await fileData.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+      setPdfBytes(bytes)
+      
       const pdf = await PDFDocument.load(arrayBuffer)
       setPdfDoc(pdf)
       setTotalPages(pdf.getPageCount())
       
-      await renderPage(0, pdf)
+      await renderPage(0, bytes)
       setLoading(false)
     } catch (error) {
       console.error('Error loading document:', error)
@@ -52,27 +57,67 @@ const DocumentEditor = () => {
     }
   }
 
-  const renderPage = async (pageIndex, pdf = pdfDoc) => {
-    if (!pdf) return
+  const renderPage = async (pageIndex, bytes = pdfBytes) => {
+    if (!bytes) return
 
-    const page = pdf.getPage(pageIndex)
-    const { width, height } = page.getSize()
-    
+    try {
+      // Use PDF.js for rendering
+      const pdfjsLib = window.pdfjsLib
+      if (!pdfjsLib) {
+        // Fallback to simple PDF display
+        renderSimplePage(pageIndex)
+        return
+      }
+
+      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+      const page = await pdf.getPage(pageIndex + 1)
+      
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext('2d')
+      
+      const viewport = page.getViewport({ scale: 1.5 })
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      
+      setScale(1.5)
+      
+      const renderContext = {
+        canvasContext: ctx,
+        viewport: viewport
+      }
+      
+      await page.render(renderContext).promise
+    } catch (error) {
+      console.error('Error rendering PDF with PDF.js:', error)
+      renderSimplePage(pageIndex)
+    }
+  }
+
+  const renderSimplePage = (pageIndex) => {
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     
-    const scale = Math.min(800 / width, 600 / height)
-    canvas.width = width * scale
-    canvas.height = height * scale
+    canvas.width = 800
+    canvas.height = 1000
+    setScale(1)
     
     ctx.fillStyle = 'white'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
+    
+    ctx.fillStyle = '#f8f9fa'
+    ctx.fillRect(20, 20, canvas.width - 40, canvas.height - 40)
+    
     ctx.fillStyle = 'black'
-    ctx.font = '16px Arial'
+    ctx.font = '24px Arial'
     ctx.textAlign = 'center'
-    ctx.fillText(`Page ${pageIndex + 1} of ${totalPages}`, canvas.width / 2, 30)
+    ctx.fillText(`PDF Page ${pageIndex + 1}`, canvas.width / 2, 60)
+    
+    ctx.font = '16px Arial'
+    ctx.fillText('Click "Add Signature Area" and then click on this area', canvas.width / 2, 100)
+    ctx.fillText('to place signature fields for the recipient', canvas.width / 2, 120)
     
     ctx.strokeStyle = '#ddd'
+    ctx.lineWidth = 2
     ctx.strokeRect(0, 0, canvas.width, canvas.height)
   }
 
@@ -166,10 +211,15 @@ const DocumentEditor = () => {
             >
               {isPlacingSignature ? 'Click on PDF to place signature' : 'Add Signature Area'}
             </button>
+            {isPlacingSignature && (
+              <p className="instruction-text">
+                Click anywhere on the PDF to place a signature field
+              </p>
+            )}
           </div>
 
           <div className="signature-areas-list">
-            <h3>Signature Areas:</h3>
+            <h3>Signature Areas ({signatureAreas.length}):</h3>
             {signatureAreas.map((area) => (
               <div key={area.id} className="signature-area-item">
                 <span>Page {area.page + 1}</span>
@@ -226,7 +276,7 @@ const DocumentEditor = () => {
                   removeSignatureArea(area.id)
                 }}
               >
-                Signature Area
+                Signature Area (Click to remove)
               </div>
             ))}
         </div>
