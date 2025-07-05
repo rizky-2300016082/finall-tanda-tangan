@@ -1,6 +1,7 @@
 
--- Create documents table
-CREATE TABLE documents (
+
+-- Create documents table only if it doesn't exist
+CREATE TABLE IF NOT EXISTS documents (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   filename text NOT NULL,
   file_path text NOT NULL,
@@ -14,10 +15,10 @@ CREATE TABLE documents (
   signed_at timestamp with time zone
 );
 
--- Create indexes for better performance
-CREATE INDEX documents_sender_id_idx ON documents(sender_id);
-CREATE INDEX documents_public_link_idx ON documents(public_link);
-CREATE INDEX documents_status_idx ON documents(status);
+-- Create indexes for better performance (only if they don't exist)
+CREATE INDEX IF NOT EXISTS documents_sender_id_idx ON documents(sender_id);
+CREATE INDEX IF NOT EXISTS documents_public_link_idx ON documents(public_link);
+CREATE INDEX IF NOT EXISTS documents_status_idx ON documents(status);
 
 -- Enable Row Level Security
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
@@ -29,6 +30,8 @@ DROP POLICY IF EXISTS "Users can update their own documents" ON documents;
 DROP POLICY IF EXISTS "Anyone can view documents with public link" ON documents;
 DROP POLICY IF EXISTS "Anyone can update documents for signing" ON documents;
 DROP POLICY IF EXISTS "Delete own documents" ON documents;
+DROP POLICY IF EXISTS "Public access to documents with valid link" ON documents;
+DROP POLICY IF EXISTS "Public update for signing documents" ON documents;
 
 -- Create policies for documents table
 CREATE POLICY "Users can view their own documents" ON documents
@@ -49,8 +52,10 @@ CREATE POLICY "Public update for signing documents" ON documents
 CREATE POLICY "Delete own documents" ON documents
   FOR DELETE USING (auth.uid() = sender_id AND auth.role() = 'authenticated');
 
--- Create storage bucket for documents
-INSERT INTO storage.buckets (id, name, public) VALUES ('documents', 'documents', false);
+-- Create storage bucket for documents (only if it doesn't exist)
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('documents', 'documents', false)
+ON CONFLICT (id) DO NOTHING;
 
 -- Drop existing storage policies if they exist
 DROP POLICY IF EXISTS "Authenticated users can upload documents" ON storage.objects;
@@ -71,3 +76,4 @@ CREATE POLICY "Public access to documents" ON storage.objects
 
 CREATE POLICY "System can upload signed documents" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'documents');
+
