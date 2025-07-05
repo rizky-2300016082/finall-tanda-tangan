@@ -89,9 +89,30 @@ const Dashboard = () => {
       const filePath = doc.signed_file_path || doc.file_path
       console.log('File path:', filePath)
       
-      const { data, error } = await supabase.storage
-        .from('documents')
-        .download(filePath)
+      // Add retry logic
+      let retries = 3
+      let data = null
+      let error = null
+      
+      while (retries > 0 && !data) {
+        try {
+          const result = await supabase.storage
+            .from('documents')
+            .download(filePath)
+          
+          data = result.data
+          error = result.error
+          break
+        } catch (downloadError) {
+          console.error(`Download attempt failed, retries left: ${retries - 1}`, downloadError)
+          retries--
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          } else {
+            error = downloadError
+          }
+        }
+      }
 
       if (error) {
         console.error('Storage download error:', error)
@@ -104,17 +125,26 @@ const Dashboard = () => {
 
       console.log('File downloaded successfully, size:', data.size)
       
-      const url = URL.createObjectURL(data)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = doc.signed_file_path ? `signed_${doc.filename}` : doc.filename
-      a.style.display = 'none'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      
-      console.log('Download completed')
+      // Create download using browser API
+      try {
+        const url = URL.createObjectURL(data)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = doc.signed_file_path ? `signed_${doc.filename}` : doc.filename
+        link.style.display = 'none'
+        
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        
+        // Clean up the URL object
+        setTimeout(() => URL.revokeObjectURL(url), 100)
+        
+        console.log('Download completed')
+      } catch (downloadError) {
+        console.error('Browser download error:', downloadError)
+        throw new Error('Failed to trigger download')
+      }
     } catch (error) {
       console.error('Error downloading document:', error)
       alert(`Error downloading document: ${error.message}`)

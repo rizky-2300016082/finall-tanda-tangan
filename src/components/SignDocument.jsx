@@ -24,9 +24,17 @@ const SignDocument = () => {
 
   useEffect(() => {
     // Initialize PDF.js worker
-    if (typeof window !== 'undefined' && window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+    const initializePdfJs = () => {
+      if (typeof window !== 'undefined' && window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+        console.log('PDF.js worker configured')
+      } else {
+        // Retry after a short delay if PDF.js is not loaded yet
+        setTimeout(initializePdfJs, 100)
+      }
     }
+    
+    initializePdfJs()
     loadDocument()
   }, [documentId])
 
@@ -35,23 +43,44 @@ const SignDocument = () => {
       console.log('Loading document with public link:', documentId)
       
       if (!documentId) {
-        throw new Error('No document ID provided')
+        console.error('No document ID provided')
+        setDocument(null)
+        setLoading(false)
+        return
       }
       
-      // First try to find by public_link
-      const { data: docData, error: docError } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('public_link', documentId)
-        .single()
-
-      if (docError) {
-        console.error('Database error:', docError)
-        throw new Error('Document not found or link has expired')
+      // Add retry logic for network issues
+      let retries = 3
+      let docData = null
+      let docError = null
+      
+      while (retries > 0 && !docData) {
+        try {
+          const result = await supabase
+            .from('documents')
+            .select('*')
+            .eq('public_link', documentId)
+            .single()
+          
+          docData = result.data
+          docError = result.error
+          break
+        } catch (fetchError) {
+          console.error(`Fetch attempt failed, retries left: ${retries - 1}`, fetchError)
+          retries--
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          } else {
+            docError = fetchError
+          }
+        }
       }
 
-      if (!docData) {
-        throw new Error('Document not found')
+      if (docError || !docData) {
+        console.error('Database error:', docError)
+        setDocument(null)
+        setLoading(false)
+        return
       }
       
       console.log('Document data:', docData)
@@ -59,17 +88,36 @@ const SignDocument = () => {
 
       console.log('Attempting to download file:', docData.file_path)
       
-      const { data: fileData, error: fileError } = await supabase.storage
-        .from('documents')
-        .download(docData.file_path)
-
-      if (fileError) {
-        console.error('Storage error:', fileError)
-        throw new Error(`Failed to download document: ${fileError.message}`)
+      // Retry file download too
+      retries = 3
+      let fileData = null
+      let fileError = null
+      
+      while (retries > 0 && !fileData) {
+        try {
+          const result = await supabase.storage
+            .from('documents')
+            .download(docData.file_path)
+          
+          fileData = result.data
+          fileError = result.error
+          break
+        } catch (downloadError) {
+          console.error(`Download attempt failed, retries left: ${retries - 1}`, downloadError)
+          retries--
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          } else {
+            fileError = downloadError
+          }
+        }
       }
 
-      if (!fileData) {
-        throw new Error('No file data received')
+      if (fileError || !fileData) {
+        console.error('Storage error:', fileError)
+        setDocument(null)
+        setLoading(false)
+        return
       }
 
       const arrayBuffer = await fileData.arrayBuffer()
@@ -82,7 +130,8 @@ const SignDocument = () => {
         setTotalPages(pdf.getPageCount())
       } catch (pdfError) {
         console.error('PDF loading error:', pdfError)
-        throw new Error('Invalid PDF file')
+        // Continue anyway, we'll use fallback rendering
+        setTotalPages(1)
       }
       
       // Wait a bit before rendering to ensure canvas is ready
@@ -92,8 +141,11 @@ const SignDocument = () => {
           setupSignatureCanvas()
         } catch (renderError) {
           console.error('Error rendering page:', renderError)
+          // Try fallback rendering
+          renderSimplePage(0)
+          setupSignatureCanvas()
         }
-      }, 100)
+      }, 300)
       
       setLoading(false)
     } catch (error) {
@@ -408,12 +460,26 @@ const SignDocument = () => {
     </div>
   )
 
-  if (!document) {
+  if (!document && !loading) {
     return (
       <div className="error" style={{ padding: '2rem', textAlign: 'center' }}>
         <h2>Document Not Found</h2>
         <p>The document you're looking for could not be found or the link has expired.</p>
         <p>Please check the link and try again.</p>
+        <button 
+          onClick={() => window.location.reload()} 
+          style={{ 
+            marginTop: '1rem', 
+            padding: '0.5rem 1rem', 
+            background: '#007bff', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+        >
+          Refresh Page
+        </button>
       </div>
     )
   }

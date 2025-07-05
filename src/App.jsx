@@ -26,10 +26,34 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <div style={{ 
+          padding: '2rem', 
+          textAlign: 'center',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}>
           <h1>Something went wrong</h1>
           <p>Please refresh the page and try again.</p>
-          <button onClick={() => window.location.reload()}>Refresh Page</button>
+          <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '1rem' }}>
+            Error: {this.state.error?.message || 'Unknown error'}
+          </p>
+          <button 
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '0.75rem 1.5rem',
+              background: '#007bff',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '16px'
+            }}
+          >
+            Refresh Page
+          </button>
         </div>
       )
     }
