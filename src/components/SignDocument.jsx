@@ -28,29 +28,37 @@ const SignDocument = () => {
 
   const loadDocument = async () => {
     try {
-      console.log('Loading document with ID:', documentId)
+      console.log('Loading document with public link:', documentId)
       
+      // First try to find by public_link
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('*')
         .eq('public_link', documentId)
         .single()
 
-      if (docError) {
-        console.error('Database error:', docError)
-        throw docError
+      if (docError || !docData) {
+        console.error('Document not found with public link:', documentId)
+        throw new Error('Document not found or link has expired')
       }
       
       console.log('Document data:', docData)
       setDocument(docData)
 
+      console.log('Attempting to download file:', docData.file_path)
+      
       const { data: fileData, error: fileError } = await supabase.storage
         .from('documents')
         .download(docData.file_path)
 
       if (fileError) {
         console.error('Storage error:', fileError)
-        throw fileError
+        console.error('File path:', docData.file_path)
+        throw new Error(`Failed to download document: ${fileError.message}`)
+      }
+
+      if (!fileData) {
+        throw new Error('No file data received')
       }
 
       const arrayBuffer = await fileData.arrayBuffer()
