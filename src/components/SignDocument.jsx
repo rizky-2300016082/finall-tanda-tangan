@@ -327,6 +327,11 @@ const SignDocument = () => {
   }, [signatureText, signatureMode])
 
   const hasValidSignature = () => {
+    // Add null check for signatureCanvasRef.current
+    if (!signatureCanvasRef.current) {
+      return false; 
+    }
+
     if (signatureMode === 'draw') {
       const canvas = signatureCanvasRef.current
       const ctx = canvas.getContext('2d')
