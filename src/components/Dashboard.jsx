@@ -84,22 +84,40 @@ const Dashboard = () => {
 
   const downloadDocument = async (document) => {
     try {
+      console.log('Downloading document:', document.filename)
+      
       const filePath = document.signed_file_path || document.file_path
+      console.log('File path:', filePath)
+      
       const { data, error } = await supabase.storage
         .from('documents')
         .download(filePath)
 
-      if (error) throw error
+      if (error) {
+        console.error('Storage download error:', error)
+        throw new Error(`Failed to download: ${error.message}`)
+      }
 
+      if (!data) {
+        throw new Error('No file data received')
+      }
+
+      console.log('File downloaded successfully, size:', data.size)
+      
       const url = URL.createObjectURL(data)
       const a = document.createElement('a')
       a.href = url
-      a.download = document.filename
+      a.download = document.signed_file_path ? `signed_${document.filename}` : document.filename
+      a.style.display = 'none'
+      document.body.appendChild(a)
       a.click()
+      document.body.removeChild(a)
       URL.revokeObjectURL(url)
+      
+      console.log('Download completed')
     } catch (error) {
       console.error('Error downloading document:', error)
-      alert('Error downloading document')
+      alert(`Error downloading document: ${error.message}`)
     }
   }
 
@@ -217,9 +235,17 @@ const Dashboard = () => {
                     )}
                     {doc.status === 'sent' && doc.public_link && (
                       <button
-                        onClick={() => navigator.clipboard.writeText(
-                          `${window.location.origin}/sign/${doc.public_link}`
-                        )}
+                        onClick={async () => {
+                          try {
+                            const link = `${window.location.origin}/sign/${doc.public_link}`
+                            await navigator.clipboard.writeText(link)
+                            alert(`Link copied to clipboard: ${link}`)
+                          } catch (error) {
+                            console.error('Failed to copy link:', error)
+                            const link = `${window.location.origin}/sign/${doc.public_link}`
+                            prompt('Copy this link manually:', link)
+                          }
+                        }}
                         className="copy-btn"
                       >
                         Copy Link

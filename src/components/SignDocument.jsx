@@ -30,6 +30,10 @@ const SignDocument = () => {
     try {
       console.log('Loading document with public link:', documentId)
       
+      if (!documentId) {
+        throw new Error('No document ID provided')
+      }
+      
       // First try to find by public_link
       const { data: docData, error: docError } = await supabase
         .from('documents')
@@ -37,9 +41,13 @@ const SignDocument = () => {
         .eq('public_link', documentId)
         .single()
 
-      if (docError || !docData) {
-        console.error('Document not found with public link:', documentId)
+      if (docError) {
+        console.error('Database error:', docError)
         throw new Error('Document not found or link has expired')
+      }
+
+      if (!docData) {
+        throw new Error('Document not found')
       }
       
       console.log('Document data:', docData)
@@ -53,7 +61,6 @@ const SignDocument = () => {
 
       if (fileError) {
         console.error('Storage error:', fileError)
-        console.error('File path:', docData.file_path)
         throw new Error(`Failed to download document: ${fileError.message}`)
       }
 
@@ -65,17 +72,23 @@ const SignDocument = () => {
       const bytes = new Uint8Array(arrayBuffer)
       setPdfBytes(bytes)
       
-      const pdf = await PDFDocument.load(arrayBuffer)
-      setPdfDoc(pdf)
-      setTotalPages(pdf.getPageCount())
+      try {
+        const pdf = await PDFDocument.load(arrayBuffer)
+        setPdfDoc(pdf)
+        setTotalPages(pdf.getPageCount())
+      } catch (pdfError) {
+        console.error('PDF loading error:', pdfError)
+        throw new Error('Invalid PDF file')
+      }
       
       await renderPage(0, bytes)
       setupSignatureCanvas()
       setLoading(false)
     } catch (error) {
       console.error('Error loading document:', error)
-      alert('Error loading document. Please check if the link is valid.')
+      setDocument(null)
       setLoading(false)
+      // Don't show alert immediately, let the component render the error state
     }
   }
 
@@ -101,7 +114,15 @@ const SignDocument = () => {
       }
 
       console.log('Rendering page with PDF.js:', pageIndex + 1)
-      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+      
+      // Load PDF document
+      const loadingTask = pdfjsLib.getDocument({ 
+        data: bytes,
+        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapPacked: true
+      })
+      
+      const pdf = await loadingTask.promise
       const page = await pdf.getPage(pageIndex + 1)
       
       const ctx = canvas.getContext('2d')
@@ -121,6 +142,7 @@ const SignDocument = () => {
       console.log('Page rendered successfully')
     } catch (error) {
       console.error('Error rendering PDF with PDF.js:', error)
+      console.log('Falling back to simple page rendering')
       renderSimplePage(pageIndex)
     }
   }
@@ -364,10 +386,20 @@ const SignDocument = () => {
     }
   }
 
-  if (loading) return <div className="loading">Loading document...</div>
+  if (loading) return (
+    <div className="loading" style={{ padding: '2rem', textAlign: 'center' }}>
+      <p>Loading document...</p>
+    </div>
+  )
 
   if (!document) {
-    return <div className="error">Document not found or link has expired.</div>
+    return (
+      <div className="error" style={{ padding: '2rem', textAlign: 'center' }}>
+        <h2>Document Not Found</h2>
+        <p>The document you're looking for could not be found or the link has expired.</p>
+        <p>Please check the link and try again.</p>
+      </div>
+    )
   }
 
   return (
