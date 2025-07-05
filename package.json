@@ -19,5 +19,11 @@
     "react-dom": "^18.2.0",
     "typescript": "^5.2.2",
     "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.3",
+    "lucide-react": "^0.525.0",
+    "pdf-lib": "^1.17.1",
+    "react-router-dom": "^7.6.3"
   }
 }
