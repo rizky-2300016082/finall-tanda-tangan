@@ -1,0 +1,32 @@
+Proyek Pengembangan Aplikasi: Manajemen Tanda Tangan Dokumen Digital (Full Build Request)
+Tujuan: Bangun aplikasi web fungsional untuk manajemen tanda tangan digital pada dokumen PDF. Aplikasi ini harus menjadi solusi yang utuh dan siap digunakan, dengan fokus pada pengalaman pengguna inti tanpa kompleksitas admin sistem atau enkripsi yang berlebihan. AI diminta untuk melakukan pembangunan penuh dan menyediakan semua kode yang diperlukan.
+
+Detail Aplikasi & Stack Teknologi:
+Nama Aplikasi: Manajemen Tanda Tangan Dokumen Digital
+
+Frontend: React.js (menggunakan Vite untuk bundling)
+
+Backend: Supabase (sebagai backend tunggal untuk Autentikasi, Database, dan Penyimpanan File)
+
+Manipulasi PDF: pdf-lib.js (untuk membaca, menulis, dan memodifikasi file PDF)
+
+Fitur Utama yang Akan Dikembangkan (Lengkap & Fungsional):
+1. Autentikasi Pengguna
+Registrasi Akun: Pengguna dapat membuat akun baru dengan email dan kata sandi.
+
+Login Pengguna: Pengguna terdaftar dapat masuk ke aplikasi.
+
+Manajemen Sesi: Aplikasi akan mempertahankan sesi pengguna yang terautentikasi (misalnya, melalui refresh token).
+
+2. Alur Pengiriman Dokumen (User 1 - Pengirim)
+Unggah Dokumen PDF: Antarmuka untuk mengunggah file PDF ke Supabase Storage.
+
+Penentuan Penerima: Input untuk memilih atau memasukkan email User 2 sebagai penerima tanda tangan.
+
+Editor Penempatan Tanda Tangan: Tampilan visual dokumen PDF yang memungkinkan User 1 menentukan posisi tanda tangan User 2 secara drag & drop. Ini harus akurat dan menyimpan koordinat posisi (X, Y) serta ukuran (lebar/tinggi) yang relatif terhadap halaman PDF.
+
+Generasi & Tampilan Tautan Unik: Setelah dokumen dan posisi tanda tangan diatur, aplikasi akan menghasilkan tautan publik unik untuk dokumen tersebut. Tautan ini harus ditampilkan dengan jelas agar User 1 dapat melihat dan menyalinnya.
+
+Penyalinan Tautan: Tombol atau fungsi untuk menyalin tautan yang dihasilkan ke clipboard User 1.
+
+Distribusi Tautan Manual: Asumsi bahwa User 1 akan membagikan tautan ini secara manual kepada User 2 di luar aplikasi.

@@ -1,0 +1,50 @@
+Detail Aplikasi & Stack Teknologi:
+Nama Aplikasi: Manajemen Tanda Tangan Dokumen Digital
+
+Frontend: React.js (menggunakan Vite untuk bundling)
+
+Backend: Supabase (sebagai backend tunggal untuk Autentikasi, Database, dan Penyimpanan File)
+
+Manipulasi PDF: pdf-lib.js (untuk membaca, menulis, dan memodifikasi file PDF)
+
+Fitur Utama yang Akan Dikembangkan (Lengkap & Fungsional):
+1. Autentikasi Pengguna
+Registrasi Akun: Pengguna dapat membuat akun baru dengan email dan kata sandi.
+
+Login Pengguna: Pengguna terdaftar dapat masuk ke aplikasi.
+
+Manajemen Sesi: Aplikasi akan mempertahankan sesi pengguna yang terautentikasi (misalnya, melalui refresh token).
+
+2. Alur Pengiriman Dokumen (User 1 - Pengirim)
+Unggah Dokumen PDF: Antarmuka untuk mengunggah file PDF ke Supabase Storage.
+
+Penentuan Penerima: Input untuk memilih atau memasukkan email User 2 sebagai penerima tanda tangan.
+
+Editor Penempatan Tanda Tangan: Tampilan visual dokumen PDF yang memungkinkan User 1 menentukan posisi tanda tangan User 2 secara drag & drop. Ini harus akurat dan menyimpan koordinat posisi (X, Y) serta ukuran (lebar/tinggi) yang relatif terhadap halaman PDF.
+
+Generasi & Tampilan Tautan Unik: Setelah dokumen dan posisi tanda tangan diatur, aplikasi akan menghasilkan tautan publik unik untuk dokumen tersebut. Tautan ini harus ditampilkan dengan jelas agar User 1 dapat melihat dan menyalinnya.
+
+Penyalinan Tautan: Tombol atau fungsi untuk menyalin tautan yang dihasilkan ke clipboard User 1.
+
+Distribusi Tautan Manual: Asumsi bahwa User 1 akan membagikan tautan ini secara manual kepada User 2 di luar aplikasi.
+
+3. Alur Penandatanganan Dokumen (User 2 - Penerima)
+Akses Dokumen via Tautan: User 2 dapat membuka tautan unik yang diterima secara manual untuk mengakses dokumen yang perlu ditandatangani. Akses ini tidak memerlukan login jika tautan sudah valid.
+
+Editor Tanda Tangan: Antarmuka di mana User 2 dapat membuat tanda tangan mereka dengan tiga opsi:
+
+Gambar Tanda Tangan: Menggambar tanda tangan langsung di kanvas.
+
+Ketik Tanda Tangan: Memasukkan teks yang akan diformat sebagai tanda tangan (pilih font signature-like).
+
+Unggah Gambar Tanda Tangan: Mengunggah file gambar (misalnya PNG, JPG) yang berisi tanda tangan mereka.
+
+Penerapan & Pengajuan Tanda Tangan: Setelah tanda tangan dibuat, aplikasi akan secara visual menempatkannya pada posisi yang ditentukan oleh User 1, dan User 2 dapat mengajukan tanda tangan tersebut. Proses ini harus menyisipkan tanda tangan ke dalam PDF asli menggunakan pdf-lib.js dan menyimpan dokumen PDF yang sudah ditandatangani kembali ke Supabase Storage.
+
+4. Manajemen Dokumen Setelah Penandatanganan
+Notifikasi Penyelesaian: User 1 (pengirim dokumen) akan menerima notifikasi (misalnya, di dasbor mereka) bahwa dokumen telah berhasil ditandatangani oleh User 2.
+
+Unduh Dokumen Final: User 1 dapat melihat daftar dokumen yang telah mereka kirim dan mengunduh versi final dokumen PDF yang sudah ditandatangani.
+
+Konfigurasi Supabase:
+Sediakan kode SQL lengkap untuk konfigurasi tabel database dan storage bucket di Supabase. Kode ini harus bisa langsung dieksekusi di SQL Editor Supabase
