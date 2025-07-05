@@ -18,16 +18,24 @@ const Dashboard = () => {
 
   const fetchDocuments = async () => {
     try {
+      console.log('Fetching documents for user:', user.id)
+      
       const { data, error } = await supabase
         .from('documents')
         .select('*')
         .eq('sender_id', user.id)
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (error) {
+        console.error('Fetch documents error:', error)
+        throw error
+      }
+      
+      console.log('Documents fetched:', data?.length || 0)
       setDocuments(data || [])
     } catch (error) {
       console.error('Error fetching documents:', error)
+      alert('Error loading documents')
     }
   }
 
@@ -101,34 +109,52 @@ const Dashboard = () => {
     }
 
     try {
-      // Delete from storage
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .remove([document.file_path])
-
-      if (storageError) throw storageError
-
-      // Delete signed file if exists
-      if (document.signed_file_path) {
-        await supabase.storage
-          .from('documents')
-          .remove([document.signed_file_path])
-      }
-
-      // Delete from database
+      console.log('Deleting document:', document.id)
+      
+      // Delete from database first
       const { error: dbError } = await supabase
         .from('documents')
         .delete()
         .eq('id', document.id)
+        .eq('sender_id', user.id) // Add security check
 
-      if (dbError) throw dbError
+      if (dbError) {
+        console.error('Database delete error:', dbError)
+        throw new Error(`Failed to delete from database: ${dbError.message}`)
+      }
+
+      console.log('Document deleted from database successfully')
+
+      // Delete from storage (even if this fails, document is gone from DB)
+      try {
+        const { error: storageError } = await supabase.storage
+          .from('documents')
+          .remove([document.file_path])
+
+        if (storageError) {
+          console.error('Storage delete error for main file:', storageError)
+        }
+
+        // Delete signed file if exists
+        if (document.signed_file_path) {
+          const { error: signedFileError } = await supabase.storage
+            .from('documents')
+            .remove([document.signed_file_path])
+
+          if (signedFileError) {
+            console.error('Storage delete error for signed file:', signedFileError)
+          }
+        }
+      } catch (storageError) {
+        console.error('Storage deletion failed, but document removed from database:', storageError)
+      }
 
       // Refresh the documents list
-      fetchDocuments()
+      await fetchDocuments()
       alert('Document deleted successfully')
     } catch (error) {
       console.error('Error deleting document:', error)
-      alert('Error deleting document')
+      alert(`Error deleting document: ${error.message}`)
     }
   }
 

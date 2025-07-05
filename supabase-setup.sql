@@ -47,7 +47,7 @@ CREATE POLICY "Public update for signing documents" ON documents
   FOR UPDATE USING (public_link IS NOT NULL AND public_link != '' AND status = 'sent');
 
 CREATE POLICY "Delete own documents" ON documents
-  FOR DELETE USING (auth.uid() = sender_id);
+  FOR DELETE USING (auth.uid() = sender_id AND auth.role() = 'authenticated');
 
 -- Create storage bucket for documents
 INSERT INTO storage.buckets (id, name, public) VALUES ('documents', 'documents', false);
