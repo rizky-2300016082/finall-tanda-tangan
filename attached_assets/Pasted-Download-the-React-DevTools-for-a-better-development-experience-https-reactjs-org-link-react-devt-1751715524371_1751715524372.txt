@@ -1,0 +1,31 @@
+Download the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+SignDocument.jsx:30 PDF.js worker configured
+SignDocument.jsx:43 Loading document with public link: 1751715156321-ahsgg14oc
+SignDocument.jsx:30 PDF.js worker configured
+SignDocument.jsx:43 Loading document with public link: 1751715156321-ahsgg14oc
+1751715156321-ahsgg14oc:24 PDF.js worker configured
+SignDocument.jsx:86 Document data: 
+Object
+SignDocument.jsx:89 Attempting to download file: pdfs/1751715124197_jahfwaf_signed_signed (2).pdf
+2
+SignDocument.jsx:332 Uncaught TypeError: Cannot read properties of null (reading 'getContext')
+    at hasValidSignature (SignDocument.jsx:332:26)
+    at SignDocument (SignDocument.jsx:618:37)
+chunk-ZW7WJ6XU.js?v=12931c7d:14036 The above error occurred in the <SignDocument> component:
+
+    at SignDocument (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/src/components/SignDocument.jsx:25:26)
+    at RenderedRoute (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=12931c7d:5464:26)
+    at Routes (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=12931c7d:6198:3)
+    at div
+    at Router (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=12931c7d:6141:13)
+    at BrowserRouter (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/node_modules/.vite/deps/react-router-dom.js?v=12931c7d:9183:3)
+    at AuthProvider (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/src/contexts/AuthContext.jsx:30:32)
+    at ErrorBoundary (https://794b87a3-b946-472d-a848-5c4a7565f5b9-00-9duxervjpgzp.pike.replit.dev/src/App.jsx:28:5)
+    at App
+
+React will try to recreate this component tree from scratch using the error boundary you provided, ErrorBoundary.
+App.jsx:23 Error caught by boundary: TypeError: Cannot read properties of null (reading 'getContext')
+    at hasValidSignature (SignDocument.jsx:332:26)
+    at SignDocument (SignDocument.jsx:618:37)
+ 
+Object
