@@ -1,25 +1,24 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { supabase } from '../config/supabase'
-import { PDFDocument } from 'pdf-lib'
-import { ArrowLeft, Save } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { supabase } from '../config/supabase';
+import { PDFDocument } from 'pdf-lib';
+import { ArrowLeft, Save, PlusCircle } from 'lucide-react';
 
 const DocumentEditor = () => {
-  const { documentId } = useParams()
-  const navigate = useNavigate()
-  const canvasRef = useRef(null)
-  const pdfViewerRef = useRef(null)
-  const [document, setDocument] = useState(null)
-  const [pdfDoc, setPdfDoc] = useState(null)
-  const [pdfBytes, setPdfBytes] = useState(null)
-  const [currentPage, setCurrentPage] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-  const [recipientEmail, setRecipientEmail] = useState('')
-  const [signatureAreas, setSignatureAreas] = useState([])
-  const [isPlacingSignature, setIsPlacingSignature] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [scale, setScale] = useState(1)
+  const { documentId } = useParams();
+  const navigate = useNavigate();
+  const canvasRef = useRef(null);
+  const pdfViewerRef = useRef(null);
+  
+  const [docDetails, setDocDetails] = useState(null);
+  const [pdfDoc, setPdfDoc] = useState(null); // pdf-lib document
+  const [pdfJsDoc, setPdfJsDoc] = useState(null); // pdf.js document
+  const [currentPage, setCurrentPage] = useState(1);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [signatureAreas, setSignatureAreas] = useState([]);
+  const [isPlacingSignature, setIsPlacingSignature] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const [dragState, setDragState] = useState({
     isDragging: false,
@@ -30,142 +29,124 @@ const DocumentEditor = () => {
     initialAreaY: 0,
   });
 
-  useEffect(() => {
-    loadDocument()
-  }, [documentId])
-
-  const loadDocument = async () => {
+  // Load the document from Supabase
+  const loadDocument = useCallback(async () => {
+    setLoading(true);
     try {
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('*')
         .eq('id', documentId)
-        .single()
+        .single();
+      if (docError) throw docError;
 
-      if (docError) throw docError
-      setDocument(docData)
-      if (docData.signature_areas) {
-        setSignatureAreas(docData.signature_areas)
-      }
+      setDocDetails(docData);
+      setRecipientEmail(docData.recipient_email || '');
+      setSignatureAreas(docData.signature_areas || []);
 
       const { data: fileData, error: fileError } = await supabase.storage
         .from('documents')
-        .download(docData.file_path)
+        .download(docData.file_path);
+      if (fileError) throw fileError;
 
-      if (fileError) throw fileError
+      const arrayBuffer = await fileData.arrayBuffer();
+      const pdf = await PDFDocument.load(arrayBuffer);
+      setPdfDoc(pdf);
 
-      const arrayBuffer = await fileData.arrayBuffer()
-      const bytes = new Uint8Array(arrayBuffer)
-      setPdfBytes(bytes)
-      
-      const pdf = await PDFDocument.load(arrayBuffer)
-      setPdfDoc(pdf)
-      setTotalPages(pdf.getPageCount())
-      
-      await renderPage(0, bytes)
-      setLoading(false)
+      if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${window.pdfjsLib.version}/pdf.worker.min.js`;
+      }
+      const pdfJs = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      setPdfJsDoc(pdfJs);
+
     } catch (error) {
-      console.error('Error loading document:', error)
-      setLoading(false)
+      console.error('Error loading document:', error);
+      alert('Failed to load document.');
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [documentId]);
 
-  const renderPage = async (pageIndex, bytes = pdfBytes) => {
-    if (!bytes) return
+  useEffect(() => {
+    loadDocument();
+  }, [loadDocument]);
+  
+  // Render the current page
+  const renderPage = useCallback(async (pageNumber) => {
+    if (!pdfJsDoc || !canvasRef.current || !pdfViewerRef.current) return;
 
     try {
-      const pdfjsLib = window.pdfjsLib
-      if (!pdfjsLib) {
-        renderSimplePage(pageIndex)
-        return
-      }
+      const page = await pdfJsDoc.getPage(pageNumber);
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const container = pdfViewerRef.current;
+      
+      const viewport = page.getViewport({ scale: 1 });
+      const scale = Math.min(
+        (container.clientWidth - 32) / viewport.width, 
+        (container.clientHeight - 32) / viewport.height
+      );
+      const scaledViewport = page.getViewport({ scale });
 
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-      }
-
-      const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
-      const page = await pdf.getPage(pageIndex + 1)
-      
-      const canvas = canvasRef.current
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d')
-      
-      const viewport = page.getViewport({ scale: 1.5 })
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      
-      setScale(1.5) 
+      canvas.width = scaledViewport.width;
+      canvas.height = scaledViewport.height;
 
       const renderContext = {
         canvasContext: ctx,
-        viewport: viewport
-      }
-      
-      await page.render(renderContext).promise
+        viewport: scaledViewport,
+      };
+      await page.render(renderContext).promise;
     } catch (error) {
-      console.error('Error rendering PDF with PDF.js:', error)
-      renderSimplePage(pageIndex)
+      console.error('Failed to render page:', error);
     }
-  }
+  }, [pdfJsDoc]);
 
-  const renderSimplePage = (pageIndex) => {
-    const canvas = canvasRef.current
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')
-    
-    canvas.width = 800
-    canvas.height = 1000
-    setScale(1) 
-    
-    ctx.fillStyle = 'white'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    
-    ctx.fillStyle = '#f8f9fa'
-    ctx.fillRect(20, 20, canvas.width - 40, canvas.height - 40)
-    
-    ctx.fillStyle = 'black'
-    ctx.font = '24px Arial'
-    ctx.textAlign = 'center'
-    ctx.fillText(`PDF Page ${pageIndex + 1}`, canvas.width / 2, 60)
-    
-    ctx.font = '16px Arial'
-    ctx.fillText('Click "Add Signature Area" and then click on this area', canvas.width / 2, 100)
-    ctx.fillText('to place signature fields for the recipient', canvas.width / 2, 120)
-    
-    ctx.strokeStyle = '#ddd'
-    ctx.lineWidth = 2
-    ctx.strokeRect(0, 0, canvas.width, canvas.height)
-  }
+  // Effect to render page when dependencies change
+  useEffect(() => {
+    renderPage(currentPage);
+  }, [currentPage, renderPage]);
+
+  // Effect to handle responsive rendering on resize
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver(() => {
+      renderPage(currentPage);
+    });
+
+    const viewer = pdfViewerRef.current;
+    if (viewer) {
+      resizeObserver.observe(viewer);
+    }
+
+    return () => {
+      if (viewer) {
+        resizeObserver.unobserve(viewer);
+      }
+    };
+  }, [currentPage, renderPage]);
 
   const handleCanvasClick = (event) => {
-    if (!isPlacingSignature || dragState.isDragging) return 
+    if (!isPlacingSignature || !canvasRef.current) return;
 
-    const canvas = canvasRef.current
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect()
-    
-    const xPx = event.clientX - rect.left
-    const yPx = event.clientY - rect.top
-
-    const x = xPx / rect.width
-    const y = yPx / rect.height
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) / rect.width;
+    const y = (event.clientY - rect.top) / rect.height;
 
     const newSignatureArea = {
       id: Date.now(),
-      page: currentPage,
-      x,
-      y,
-      width: 0.15, 
-      height: 0.05 
-    }
+      page: currentPage - 1, // Store as 0-indexed
+      x: Math.max(0, x - 0.075), // Center the box on click
+      y: Math.max(0, y - 0.025),
+      width: 0.15,
+      height: 0.05,
+    };
 
-    setSignatureAreas(prevAreas => [...prevAreas, newSignatureArea])
-    setIsPlacingSignature(false)
-  }
+    setSignatureAreas(prev => [...prev, newSignatureArea]);
+    setIsPlacingSignature(false);
+  };
 
   const handleMouseDownSignatureArea = useCallback((event, area) => {
-    event.stopPropagation() 
+    event.stopPropagation();
     setDragState({
       isDragging: true,
       id: area.id,
@@ -174,72 +155,66 @@ const DocumentEditor = () => {
       initialAreaX: area.x,
       initialAreaY: area.y,
     });
-  }, [])
+  }, []);
 
   const handleMouseMove = useCallback((event) => {
-    if (!dragState.isDragging) return
+    if (!dragState.isDragging || !canvasRef.current) return;
 
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    const deltaX = (event.clientX - dragState.initialMouseX) / canvasRect.width;
+    const deltaY = (event.clientY - dragState.initialMouseY) / canvasRect.height;
 
-    const canvasRect = canvas.getBoundingClientRect()
-    const currentDraggedArea = signatureAreas.find(area => area.id === dragState.id);
-
-    if (!currentDraggedArea) return;
-
-    const deltaX = event.clientX - dragState.initialMouseX;
-    const deltaY = event.clientY - dragState.initialMouseY;
-
-    const deltaXPercent = deltaX / canvasRect.width;
-    const deltaYPercent = deltaY / canvasRect.height;
-    
-    const newX = dragState.initialAreaX + deltaXPercent;
-    const newY = dragState.initialAreaY + deltaYPercent;
-
-    const boundedX = Math.max(0, Math.min(1 - currentDraggedArea.width, newX));
-    const boundedY = Math.max(0, Math.min(1 - currentDraggedArea.height, newY));
+    const newX = dragState.initialAreaX + deltaX;
+    const newY = dragState.initialAreaY + deltaY;
 
     setSignatureAreas(prevAreas =>
-      prevAreas.map(area =>
-        area.id === dragState.id
-          ? { ...area, x: boundedX, y: boundedY }
-          : area
-      )
-    )
-  }, [dragState, signatureAreas])
+      prevAreas.map(area => {
+        if (area.id === dragState.id) {
+          // Prevent dragging out of bounds
+          const boundedX = Math.max(0, Math.min(1 - area.width, newX));
+          const boundedY = Math.max(0, Math.min(1 - area.height, newY));
+          return { ...area, x: boundedX, y: boundedY };
+        }
+        return area;
+      })
+    );
+  }, [dragState]);
 
   const handleMouseUp = useCallback(() => {
     setDragState(prev => ({ ...prev, isDragging: false }));
-  }, [])
-
+  }, []);
+  
   useEffect(() => {
     if (dragState.isDragging) {
-      window.addEventListener('mousemove', handleMouseMove)
-      window.addEventListener('mouseup', handleMouseUp)
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
     } else {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
     }
-
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-  }, [dragState.isDragging, handleMouseMove, handleMouseUp])
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragState.isDragging, handleMouseMove, handleMouseUp]);
 
 
   const removeSignatureArea = (id) => {
-    setSignatureAreas(signatureAreas.filter(area => area.id !== id))
-  }
+    setSignatureAreas(areas => areas.filter(area => area.id !== id));
+  };
 
   const saveDocument = async () => {
-    if (!recipientEmail || signatureAreas.length === 0) {
-      alert('Please enter recipient email and place at least one signature area')
-      return
+    if (!recipientEmail || !/^\S+@\S+\.\S+$/.test(recipientEmail)) {
+      alert('Please enter a valid recipient email address.');
+      return;
+    }
+    if (signatureAreas.length === 0) {
+      alert('Please add at least one signature area to the document.');
+      return;
     }
 
     try {
-      const publicLink = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const publicLink = docDetails.public_link || `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
       const { error } = await supabase
         .from('documents')
@@ -247,162 +222,140 @@ const DocumentEditor = () => {
           recipient_email: recipientEmail,
           signature_areas: signatureAreas,
           public_link: publicLink,
-          status: 'sent'
+          status: 'sent',
         })
-        .eq('id', documentId)
+        .eq('id', documentId);
+      if (error) throw error;
 
-      if (error) throw error
-
-      alert(`Document setup complete! Share this link: ${window.location.origin}/sign/${publicLink}`)
-      navigate('/dashboard')
+      alert(`Document setup complete! Share this link with the recipient:
+${window.location.origin}/sign/${publicLink}`);
+      navigate('/dashboard');
     } catch (error) {
-      console.error('Error saving document:', error)
-      alert('Error saving document')
+      console.error('Error saving document:', error);
+      alert('Error saving document. Please try again.');
     }
-  }
+  };
 
-  if (loading) return <div className="flex justify-center items-center h-screen text-lg text-gray-600">Loading...</div>
+  const totalPages = pdfJsDoc?.numPages || 0;
+
+  if (loading) return <div className="flex justify-center items-center h-screen text-lg font-semibold">Loading Document Editor...</div>;
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b border-gray-200">
-        <button 
-          onClick={() => navigate('/dashboard')} 
-          className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors duration-200"
-        >
-          <ArrowLeft size={16} />
-          Back to Dashboard
+    <div className="flex flex-col h-screen bg-gray-100">
+      <header className="bg-white shadow-sm py-3 px-6 flex justify-between items-center border-b z-10">
+        <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700">
+          <ArrowLeft size={18} />
+          Dashboard
         </button>
-        <h1 className="text-xl font-bold text-gray-800">Setup Document Signature</h1>
-        <button 
-          onClick={saveDocument} 
-          className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200"
-        >
-          <Save size={16} />
-          Save & Generate Link
+        <h1 className="text-xl font-bold text-gray-800 truncate px-4">{docDetails?.filename}</h1>
+        <button onClick={saveDocument} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600">
+          <Save size={18} />
+          Save & Send
         </button>
       </header>
 
-      <div className="flex h-[calc(100vh-64px)]">
-        <div className="w-96 bg-white border-r border-gray-200 p-6 overflow-y-auto">
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar */}
+        <div className="w-80 bg-white border-r p-6 overflow-y-auto flex flex-col">
           <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-semibold mb-2">
-              Recipient Email:
-            </label>
+            <label className="block text-gray-700 text-sm font-semibold mb-2">Recipient Email:</label>
             <input
               type="email"
               value={recipientEmail}
               onChange={(e) => setRecipientEmail(e.target.value)}
-              placeholder="Enter recipient email"
+              placeholder="recipient@example.com"
               required
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full p-2 border rounded-md focus:ring-2 focus:ring-blue-500"
             />
           </div>
 
-          <div className="my-6">
+          <div className="my-4">
             <button
               onClick={() => setIsPlacingSignature(true)}
-              className={`w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white font-medium rounded-md hover:bg-blue-600 transition-colors duration-200 ${
-                isPlacingSignature ? 'bg-blue-600 animate-pulse' : ''
-              }`}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white font-medium rounded-md hover:bg-blue-600 ${isPlacingSignature ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`}
             >
-              {isPlacingSignature ? 'Click on PDF to place signature' : 'Add Signature Area'}
+              <PlusCircle size={20} />
+              {isPlacingSignature ? 'Click on PDF to Place' : 'Add Signature Area'}
             </button>
             {isPlacingSignature && (
-              <p className="text-green-600 text-sm text-center mt-2 p-3 bg-green-50 rounded-md">
-                Click anywhere on the PDF to place a signature field
+              <p className="text-blue-600 text-sm text-center mt-2 p-2 bg-blue-50 rounded-md">
+                Click anywhere on the document to add a field for the signature.
               </p>
             )}
           </div>
-
-          <div className="mt-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Signature Areas ({signatureAreas.length}):</h3>
-            {signatureAreas.length === 0 ? (
-              <p className="text-gray-600 text-sm">No signature areas added yet.</p>
-            ) : (
-              signatureAreas.map((area) => (
-                <div key={area.id} className="flex justify-between items-center p-3 border border-gray-200 rounded-md bg-gray-50 mb-2">
+          
+          <div className="mt-4 flex-grow">
+            <h3 className="text-lg font-semibold text-gray-800 mb-2">Signature Areas ({signatureAreas.length})</h3>
+            <div className="space-y-2">
+              {signatureAreas.length > 0 ? signatureAreas.map((area) => (
+                <div key={area.id} className="flex justify-between items-center p-2 border rounded-md bg-gray-50 text-sm">
                   <span className="font-medium text-gray-700">Page {area.page + 1}</span>
-                  <button 
-                    onClick={() => removeSignatureArea(area.id)}
-                    className="px-3 py-1 bg-red-500 text-white text-xs rounded-md hover:bg-red-600 transition-colors duration-200"
-                  >
+                  <button onClick={() => removeSignatureArea(area.id)} className="px-2 py-1 bg-red-500 text-white text-xs rounded-md hover:bg-red-600">
                     Remove
                   </button>
                 </div>
-              ))
-            )}
-          </div>
-
-          <div className="mt-6 flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-            <button
-              onClick={() => {
-                const newPage = Math.max(0, currentPage - 1)
-                setCurrentPage(newPage)
-                renderPage(newPage)
-              }}
-              disabled={currentPage === 0}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Previous Page
-            </button>
-            <span className="font-semibold text-gray-700">Page {currentPage + 1} of {totalPages}</span>
-            <button
-              onClick={() => {
-                const newPage = Math.min(totalPages - 1, currentPage + 1)
-                setCurrentPage(newPage)
-                renderPage(newPage)
-              }}
-              disabled={currentPage === totalPages - 1}
-              className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Next Page
-            </button>
+              )) : <p className="text-gray-500 text-sm">No signature areas added.</p>}
+            </div>
           </div>
         </div>
 
-        <div ref={pdfViewerRef} className="flex-1 flex flex-col items-center p-6 relative overflow-auto">
-          <canvas
-            ref={canvasRef}
-            onClick={handleCanvasClick}
-            className={`border-2 border-gray-300 rounded-lg shadow-lg bg-white max-w-full h-auto ${isPlacingSignature ? 'cursor-crosshair border-green-500 ring-4 ring-green-200' : ''}`}
-          />
-          {signatureAreas
-            .filter(area => area.page === currentPage)
-            .map((area) => {
-              const canvas = canvasRef.current;
-              if (!canvas) return null; 
-              const canvasRect = canvas.getBoundingClientRect();
-              const viewerRect = pdfViewerRef.current.getBoundingClientRect();
-
-              const renderPixelLeft = (area.x * canvasRect.width) + (canvasRect.left - viewerRect.left);
-              const renderPixelTop = (area.y * canvasRect.height) + (canvasRect.top - viewerRect.top);
-              const pixelWidth = area.width * canvasRect.width;
-              const pixelHeight = area.height * canvasRect.height;
-
-              return (
-                <div
-                  key={area.id}
-                  className="absolute border-2 border-blue-500 bg-blue-100 cursor-move flex items-center justify-center text-xs text-blue-700 font-bold hover:bg-red-100 hover:border-red-500 hover:text-red-700"
-                  style={{
-                    left: `${renderPixelLeft}px`,
-                    top: `${renderPixelTop}px`,
-                    width: `${pixelWidth}px`,
-                    height: `${pixelHeight}px`,
-                    pointerEvents: isPlacingSignature ? 'none' : 'auto', 
-                    zIndex: dragState.isDragging && dragState.id === area.id ? 100 : 10 
-                  }}
-                  onMouseDown={(e) => handleMouseDownSignatureArea(e, area)}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Signature Area (Drag to move)
-                </div>
-              );
-            })}
+        {/* PDF Viewer */}
+        <div ref={pdfViewerRef} className="flex-1 flex items-center justify-center p-4 relative bg-gray-200" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
+          <div className="relative shadow-lg">
+            <canvas
+              ref={canvasRef}
+              onClick={handleCanvasClick}
+              className={`bg-white ${isPlacingSignature ? 'cursor-crosshair' : ''}`}
+            />
+            {signatureAreas
+              .filter(area => area.page === currentPage - 1)
+              .map((area) => {
+                const canvas = canvasRef.current;
+                if (!canvas) return null;
+                return (
+                  <div
+                    key={area.id}
+                    className="absolute border-2 border-blue-500 bg-blue-500 bg-opacity-25 cursor-move flex items-center justify-center text-xs text-blue-800 font-bold"
+                    style={{
+                      left: `${area.x * 100}%`,
+                      top: `${area.y * 100}%`,
+                      width: `${area.width * 100}%`,
+                      height: `${area.height * 100}%`,
+                      pointerEvents: isPlacingSignature ? 'none' : 'auto',
+                      zIndex: dragState.id === area.id ? 100 : 10,
+                    }}
+                    onMouseDown={(e) => handleMouseDownSignatureArea(e, area)}
+                  >
+                    Signature
+                  </div>
+                );
+              })}
+          </div>
         </div>
+        
+         {/* Bottom Navigation */}
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center bg-white p-2 rounded-lg shadow-2xl">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              className="px-4 py-2 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <span className="font-semibold text-gray-800 px-4">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              className="px-4 py-2 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default DocumentEditor
+export default DocumentEditor;

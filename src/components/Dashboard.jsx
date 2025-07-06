@@ -48,10 +48,10 @@ const Dashboard = () => {
 
     setUploading(true)
     try {
-      const fileName = `${Date.now()}_${file.name}`
+      const fileName = `${user.id}/${Date.now()}_${file.name}`
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(`pdfs/${fileName}`, file)
+        .upload(fileName, file)
 
       if (uploadError) throw uploadError
 
@@ -89,29 +89,9 @@ const Dashboard = () => {
       const filePath = doc.signed_file_path || doc.file_path
       console.log('File path:', filePath)
       
-      let retries = 3
-      let data = null
-      let error = null
-      
-      while (retries > 0 && !data) {
-        try {
-          const result = await supabase.storage
-            .from('documents')
-            .download(filePath)
-          
-          data = result.data
-          error = result.error
-          break
-        } catch (downloadError) {
-          console.error(`Download attempt failed, retries left: ${retries - 1}`, downloadError)
-          retries--
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000))
-          } else {
-            error = downloadError
-          }
-        }
-      }
+      const { data, error } = await supabase.storage
+        .from('documents')
+        .download(filePath)
 
       if (error) {
         console.error('Storage download error:', error)
@@ -124,24 +104,16 @@ const Dashboard = () => {
 
       console.log('File downloaded successfully, size:', data.size)
       
-      try {
-        const url = URL.createObjectURL(data)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = doc.signed_file_path ? `signed_${doc.filename}` : doc.filename
-        link.style.display = 'none'
+      const url = URL.createObjectURL(data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = doc.signed_file_path ? `signed_${doc.filename}` : doc.filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
         
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        
-        setTimeout(() => URL.revokeObjectURL(url), 100)
-        
-        console.log('Download completed')
-      } catch (downloadError) {
-        console.error('Browser download error:', downloadError)
-        throw new Error('Failed to trigger download')
-      }
+      console.log('Download completed')
     } catch (error) {
       console.error('Error downloading document:', error)
       alert(`Error downloading document: ${error.message}`)
@@ -149,55 +121,60 @@ const Dashboard = () => {
   }
 
   const deleteDocument = async (doc) => {
-    if (!confirm(`Are you sure you want to delete "${doc.filename}"?`)) {
-      return
+    if (!confirm(`Are you sure you want to delete "${doc.filename}"? This action cannot be undone.`)) {
+      return;
     }
 
     try {
-      console.log('Deleting document:', doc.id)
-      
+      // 1. Identify all files to be deleted from storage
+      const filesToDelete = [doc.file_path];
+      if (doc.signed_file_path) {
+        filesToDelete.push(doc.signed_file_path);
+      }
+
+      console.log('Attempting to delete files from storage:', filesToDelete);
+
+      // 2. Delete files from Supabase Storage FIRST
+      // This is critical because our RLS policy for deletion depends on the database record
+      const { data: fileDeleteData, error: storageError } = await supabase.storage
+        .from('documents')
+        .remove(filesToDelete);
+
+      if (storageError) {
+        console.error('Error deleting from storage:', storageError);
+        // IMPORTANT: Stop the process if storage deletion fails
+        throw new Error(`Failed to delete document files from storage. Please try again. Error: ${storageError.message}`);
+      }
+
+      console.log('Files deleted from storage successfully:', fileDeleteData);
+
+      // 3. If storage deletion was successful, delete the database record
+      console.log('Deleting document record from database:', doc.id);
       const { error: dbError } = await supabase
         .from('documents')
         .delete()
-        .eq('id', doc.id)
-        .eq('sender_id', user.id)
+        .eq('id', doc.id);
 
       if (dbError) {
-        console.error('Database delete error:', dbError)
-        throw new Error(`Failed to delete from database: ${dbError.message}`)
+        console.error('Database delete error:', dbError);
+        // If this fails, we have an orphaned file in storage. 
+        // This is less ideal, but better than an orphaned DB record.
+        // A cleanup script could be implemented for such cases.
+        throw new Error(`Files were deleted, but failed to delete the document record. Please contact support. Error: ${dbError.message}`);
       }
+      
+      console.log('Document record deleted successfully.');
 
-      console.log('Document deleted from database successfully')
+      // 4. Update the UI to reflect the deletion
+      setDocuments(documents.filter(d => d.id !== doc.id));
+      alert('Document and all associated files have been deleted successfully.');
 
-      try {
-        const { error: storageError } = await supabase.storage
-          .from('documents')
-          .remove([doc.file_path])
-
-        if (storageError) {
-          console.error('Storage delete error for main file:', storageError)
-        }
-
-        if (doc.signed_file_path) {
-          const { error: signedFileError } = await supabase.storage
-            .from('documents')
-            .remove([doc.signed_file_path])
-
-          if (signedFileError) {
-            console.error('Storage delete error for signed file:', signedFileError)
-          }
-        }
-      } catch (storageError) {
-        console.error('Storage deletion failed, but document removed from database:', storageError)
-      }
-
-      await fetchDocuments()
-      alert('Document deleted successfully')
     } catch (error) {
-      console.error('Error deleting document:', error)
-      alert(`Error deleting document: ${error.message}`)
+      console.error('A critical error occurred during the deletion process:', error);
+      alert(error.message); // Display the specific error message to the user
     }
-  }
+  };
+
 
   return (
     <div className="min-h-screen bg-gray-100">

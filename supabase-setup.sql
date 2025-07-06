@@ -1,5 +1,4 @@
 
-
 -- Create documents table only if it doesn't exist
 CREATE TABLE IF NOT EXISTS documents (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -23,15 +22,13 @@ CREATE INDEX IF NOT EXISTS documents_status_idx ON documents(status);
 -- Enable Row Level Security
 ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if they exist
+-- Drop existing policies if they exist to avoid conflicts
 DROP POLICY IF EXISTS "Users can view their own documents" ON documents;
 DROP POLICY IF EXISTS "Users can insert their own documents" ON documents;
 DROP POLICY IF EXISTS "Users can update their own documents" ON documents;
-DROP POLICY IF EXISTS "Anyone can view documents with public link" ON documents;
-DROP POLICY IF EXISTS "Anyone can update documents for signing" ON documents;
-DROP POLICY IF EXISTS "Delete own documents" ON documents;
 DROP POLICY IF EXISTS "Public access to documents with valid link" ON documents;
 DROP POLICY IF EXISTS "Public update for signing documents" ON documents;
+DROP POLICY IF EXISTS "Delete own documents" ON documents;
 
 -- Create policies for documents table
 CREATE POLICY "Users can view their own documents" ON documents
@@ -50,30 +47,37 @@ CREATE POLICY "Public update for signing documents" ON documents
   FOR UPDATE USING (public_link IS NOT NULL AND public_link != '' AND status = 'sent');
 
 CREATE POLICY "Delete own documents" ON documents
-  FOR DELETE USING (auth.uid() = sender_id AND auth.role() = 'authenticated');
+  FOR DELETE USING (auth.uid() = sender_id);
 
 -- Create storage bucket for documents (only if it doesn't exist)
 INSERT INTO storage.buckets (id, name, public) 
 VALUES ('documents', 'documents', false)
 ON CONFLICT (id) DO NOTHING;
 
--- Drop existing storage policies if they exist
+-- Drop existing storage policies if they exist to avoid conflicts
 DROP POLICY IF EXISTS "Authenticated users can upload documents" ON storage.objects;
-DROP POLICY IF EXISTS "Users can view documents they own" ON storage.objects;
-DROP POLICY IF EXISTS "Anyone can view signed documents" ON storage.objects;
-DROP POLICY IF EXISTS "System can upload signed documents" ON storage.objects;
-DROP POLICY IF EXISTS "Public access to documents" ON storage.objects;
+DROP POLICY IF EXISTS "Users can view their own document files" ON storage.objects;
+DROP POLICY IF EXISTS "Users can delete their own document files" ON storage.objects;
 
 -- Create storage policies
 CREATE POLICY "Authenticated users can upload documents" ON storage.objects
   FOR INSERT WITH CHECK (bucket_id = 'documents' AND auth.role() = 'authenticated');
 
-CREATE POLICY "Users can view documents they own" ON storage.objects
-  FOR SELECT USING (bucket_id = 'documents' AND auth.uid()::text = (storage.foldername(name))[1]);
+CREATE POLICY "Users can view their own document files" ON storage.objects
+  FOR SELECT USING (
+    bucket_id = 'documents' AND
+    EXISTS (
+      SELECT 1 FROM public.documents d
+      WHERE (d.file_path = name OR d.signed_file_path = name) AND d.sender_id = auth.uid()
+    )
+  );
 
-CREATE POLICY "Public access to documents" ON storage.objects
-  FOR SELECT USING (bucket_id = 'documents');
-
-CREATE POLICY "System can upload signed documents" ON storage.objects
-  FOR INSERT WITH CHECK (bucket_id = 'documents');
-
+-- NEW, MORE ROBUST DELETE POLICY
+CREATE POLICY "Users can delete their own document files" ON storage.objects
+  FOR DELETE USING (
+    bucket_id = 'documents' AND
+    EXISTS (
+      SELECT 1 FROM public.documents d
+      WHERE (d.file_path = name OR d.signed_file_path = name) AND d.sender_id = auth.uid()
+    )
+  );
