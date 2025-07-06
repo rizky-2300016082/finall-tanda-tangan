@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../config/supabase'
 import { useNavigate } from 'react-router-dom'
-import { Upload, FileText, Download, LogOut, Trash2 } from 'lucide-react'
+import { Upload, FileText, Download, LogOut, Trash2, Copy } from 'lucide-react'
 
 const Dashboard = () => {
   const { user, signOut } = useAuth()
@@ -89,7 +89,6 @@ const Dashboard = () => {
       const filePath = doc.signed_file_path || doc.file_path
       console.log('File path:', filePath)
       
-      // Add retry logic
       let retries = 3
       let data = null
       let error = null
@@ -125,7 +124,6 @@ const Dashboard = () => {
 
       console.log('File downloaded successfully, size:', data.size)
       
-      // Create download using browser API
       try {
         const url = URL.createObjectURL(data)
         const link = document.createElement('a')
@@ -137,7 +135,6 @@ const Dashboard = () => {
         link.click()
         document.body.removeChild(link)
         
-        // Clean up the URL object
         setTimeout(() => URL.revokeObjectURL(url), 100)
         
         console.log('Download completed')
@@ -159,12 +156,11 @@ const Dashboard = () => {
     try {
       console.log('Deleting document:', doc.id)
       
-      // Delete from database first
       const { error: dbError } = await supabase
         .from('documents')
         .delete()
         .eq('id', doc.id)
-        .eq('sender_id', user.id) // Add security check
+        .eq('sender_id', user.id)
 
       if (dbError) {
         console.error('Database delete error:', dbError)
@@ -173,7 +169,6 @@ const Dashboard = () => {
 
       console.log('Document deleted from database successfully')
 
-      // Delete from storage (even if this fails, document is gone from DB)
       try {
         const { error: storageError } = await supabase.storage
           .from('documents')
@@ -183,7 +178,6 @@ const Dashboard = () => {
           console.error('Storage delete error for main file:', storageError)
         }
 
-        // Delete signed file if exists
         if (doc.signed_file_path) {
           const { error: signedFileError } = await supabase.storage
             .from('documents')
@@ -197,7 +191,6 @@ const Dashboard = () => {
         console.error('Storage deletion failed, but document removed from database:', storageError)
       }
 
-      // Refresh the documents list
       await fetchDocuments()
       alert('Document deleted successfully')
     } catch (error) {
@@ -207,22 +200,25 @@ const Dashboard = () => {
   }
 
   return (
-    <div className="dashboard">
-      <header className="dashboard-header">
-        <h1>Document Signature Manager</h1>
-        <div className="header-actions">
-          <span>Welcome, {user?.email}</span>
-          <button onClick={handleSignOut} className="sign-out-btn">
+    <div className="min-h-screen bg-gray-100">
+      <header className="bg-white shadow-sm py-4 px-6 flex justify-between items-center border-b border-gray-200">
+        <h1 className="text-2xl font-bold text-gray-800">Document Signature Manager</h1>
+        <div className="flex items-center space-x-4">
+          <span className="text-gray-700 font-medium">Welcome, {user?.email}</span>
+          <button 
+            onClick={handleSignOut} 
+            className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors duration-200"
+          >
             <LogOut size={16} />
             Sign Out
           </button>
         </div>
       </header>
 
-      <div className="dashboard-content">
-        <div className="upload-section">
-          <h2>Upload New Document</h2>
-          <label className="upload-button">
+      <div className="container mx-auto p-6 max-w-7xl">
+        <div className="bg-white rounded-lg shadow-md p-8 mb-8 text-center">
+          <h2 className="text-2xl font-semibold text-gray-800 mb-4">Upload New Document</h2>
+          <label className="inline-flex items-center gap-3 px-6 py-3 bg-green-500 text-white font-medium rounded-lg cursor-pointer hover:bg-green-600 transition-colors duration-200">
             <Upload size={20} />
             {uploading ? 'Uploading...' : 'Upload PDF'}
             <input
@@ -230,35 +226,35 @@ const Dashboard = () => {
               accept=".pdf"
               onChange={handleFileUpload}
               disabled={uploading}
-              style={{ display: 'none' }}
+              className="hidden"
             />
           </label>
         </div>
 
         <div className="documents-section">
-          <h2>Your Documents</h2>
+          <h2 className="text-2xl font-semibold text-gray-800 mb-6">Your Documents</h2>
           {documents.length === 0 ? (
-            <p>No documents uploaded yet.</p>
+            <p className="text-gray-600 text-lg">No documents uploaded yet.</p>
           ) : (
-            <div className="documents-grid">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {documents.map((doc) => (
-                <div key={doc.id} className="document-card">
-                  <div className="document-icon">
-                    <FileText size={24} />
-                  </div>
-                  <div className="document-info">
-                    <h3>{doc.filename}</h3>
-                    <p>Status: {doc.status}</p>
+                <div key={doc.id} className="bg-white rounded-lg shadow-md p-6 border border-gray-200 flex flex-col justify-between">
+                  <div>
+                    <div className="text-blue-500 mb-3">
+                      <FileText size={32} />
+                    </div>
+                    <h3 className="text-lg font-semibold text-gray-800 mb-2">{doc.filename}</h3>
+                    <p className="text-sm text-gray-600 mb-1">Status: <span className="font-medium text-blue-600">{doc.status}</span></p>
                     {doc.recipient_email && (
-                      <p>Recipient: {doc.recipient_email}</p>
+                      <p className="text-sm text-gray-600 mb-1">Recipient: <span className="font-medium">{doc.recipient_email}</span></p>
                     )}
-                    <p>Created: {new Date(doc.created_at).toLocaleDateString()}</p>
+                    <p className="text-sm text-gray-600">Created: {new Date(doc.created_at).toLocaleDateString()}</p>
                   </div>
-                  <div className="document-actions">
+                  <div className="mt-5 flex flex-wrap gap-2">
                     {doc.status === 'pending_setup' && (
                       <button
                         onClick={() => navigate(`/editor/${doc.id}`)}
-                        className="edit-btn"
+                        className="flex items-center gap-1 px-3 py-1 bg-cyan-600 text-white text-sm rounded-md hover:bg-cyan-700 transition-colors duration-200"
                       >
                         Setup Signature
                       </button>
@@ -276,15 +272,16 @@ const Dashboard = () => {
                             prompt('Copy this link manually:', link)
                           }
                         }}
-                        className="copy-btn"
+                        className="flex items-center gap-1 px-3 py-1 bg-yellow-500 text-gray-800 text-sm rounded-md hover:bg-yellow-600 transition-colors duration-200"
                       >
+                        <Copy size={16} />
                         Copy Link
                       </button>
                     )}
                     {(doc.status === 'signed' || doc.status === 'sent') && (
                       <button
                         onClick={() => downloadDocument(doc)}
-                        className="download-btn"
+                        className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white text-sm rounded-md hover:bg-green-600 transition-colors duration-200"
                       >
                         <Download size={16} />
                         Download
@@ -292,7 +289,7 @@ const Dashboard = () => {
                     )}
                     <button
                       onClick={() => deleteDocument(doc)}
-                      className="delete-btn"
+                      className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-sm rounded-md hover:bg-red-600 transition-colors duration-200"
                     >
                       <Trash2 size={16} />
                       Delete
