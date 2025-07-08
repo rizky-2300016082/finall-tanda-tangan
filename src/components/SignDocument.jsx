@@ -9,16 +9,22 @@ const sanitizeFilename = (filename) => {
   return filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
 };
 
+const isValidUUID = (uuid) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
+};
+
 const SignDocument = () => {
   const { documentId } = useParams();
   const navigate = useNavigate();
   const canvasRef = useRef(null);
   const signatureCanvasRef = useRef(null);
   const pdfViewerRef = useRef(null);
+  const renderTaskRef = useRef(null);
   
   const [docDetails, setDocDetails] = useState(null);
-  const [pdfDoc, setPdfDoc] = useState(null); // pdf-lib document
-  const [pdfJsDoc, setPdfJsDoc] = useState(null); // pdf.js document
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [pdfJsDoc, setPdfJsDoc] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [signatureMode, setSignatureMode] = useState('draw');
   const [signatureText, setSignatureText] = useState('');
@@ -26,43 +32,37 @@ const SignDocument = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [signing, setSigning] = useState(false);
+  const lastPos = useRef({});
 
-  // Load document details and PDF data
   const loadDocument = useCallback(async () => {
     setLoading(true);
     try {
-      if (!documentId) throw new Error("No document ID provided.");
-
+      if (!documentId || !isValidUUID(documentId)) {
+        throw new Error("Invalid document link.");
+    }
       const { data: docData, error: docError } = await supabase
         .from('documents')
         .select('*')
         .eq('public_link', documentId)
         .single();
-
       if (docError || !docData) throw new Error("Document not found or link is invalid.");
-      
       setDocDetails(docData);
-
       const { data: fileData, error: fileError } = await supabase.storage
         .from('documents')
         .download(docData.file_path);
-      if (fileError) throw new Error("Failed to download document file.");
-      
+      if (fileError) throw new Error(`Failed to download document file: ${fileError.message}`);
       const arrayBuffer = await fileData.arrayBuffer();
       const pdf = await PDFDocument.load(arrayBuffer);
       setPdfDoc(pdf);
-
       if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${window.pdfjsLib.version}/pdf.worker.min.js`;
       }
       const pdfJs = await window.pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
       setPdfJsDoc(pdfJs);
-      
       setupSignatureCanvas();
-
     } catch (error) {
       console.error('Error loading document:', error);
-      setDocDetails(null); // Clear details on error
+      setDocDetails(null);
     } finally {
       setLoading(false);
     }
@@ -72,10 +72,11 @@ const SignDocument = () => {
     loadDocument();
   }, [loadDocument]);
 
-  // Render the current PDF page to fit the container
   const renderPage = useCallback(async (pageNumber) => {
     if (!pdfJsDoc || !canvasRef.current || !pdfViewerRef.current) return;
-
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
+    }
     try {
       const page = await pdfJsDoc.getPage(pageNumber);
       const canvas = canvasRef.current;
@@ -83,72 +84,78 @@ const SignDocument = () => {
       const container = pdfViewerRef.current;
       
       const viewport = page.getViewport({ scale: 1 });
-      // Calculate scale to fit the container while maintaining aspect ratio
+      const rotation = page.rotate;
+      
+      const rotatedViewport = page.getViewport({ scale: 1, rotation });
       const scale = Math.min(
-        (container.clientWidth - 32) / viewport.width, // 32px padding
-        (container.clientHeight - 32) / viewport.height
+        (container.clientWidth - 32) / rotatedViewport.width,
+        (container.clientHeight - 32) / rotatedViewport.height
       );
-      const scaledViewport = page.getViewport({ scale });
+      const scaledViewport = page.getViewport({ scale, rotation });
 
       canvas.width = scaledViewport.width;
       canvas.height = scaledViewport.height;
 
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+
       const renderContext = {
         canvasContext: ctx,
-        viewport: scaledViewport,
+        viewport: scaledViewport
       };
-      await page.render(renderContext).promise;
+      
+      renderTaskRef.current = page.render(renderContext);
+      await renderTaskRef.current.promise;
+      renderTaskRef.current = null;
     } catch (error) {
-      console.error(`Failed to render page ${pageNumber}:`, error);
+      if (error.name === 'RenderingCancelledException') {
+        console.warn(`Page render cancelled for page ${pageNumber}.`);
+      } else {
+        console.error(`Failed to render page ${pageNumber}:`, error);
+      }
     }
   }, [pdfJsDoc]);
 
-  // Render page when it changes or pdfJsDoc is loaded
   useEffect(() => {
-    if (pdfJsDoc) {
-      renderPage(currentPage);
-    }
+    if (pdfJsDoc) renderPage(currentPage);
   }, [currentPage, pdfJsDoc, renderPage]);
 
-  // Add resize observer for responsive rendering
   useEffect(() => {
     const resizeObserver = new ResizeObserver(() => {
-      if (pdfJsDoc) {
-        renderPage(currentPage);
-      }
+      if (pdfJsDoc) renderPage(currentPage);
     });
     const viewer = pdfViewerRef.current;
-    if (viewer) {
-      resizeObserver.observe(viewer);
-    }
+    if (viewer) resizeObserver.observe(viewer);
     return () => {
-      if (viewer) {
-        resizeObserver.unobserve(viewer);
+      if (viewer) resizeObserver.unobserve(viewer);
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
       }
     };
   }, [currentPage, pdfJsDoc, renderPage]);
 
-
   const setupSignatureCanvas = () => {
     const canvas = signatureCanvasRef.current;
     if (!canvas) return;
+    const ctx = canvas.getContext('2d');
     canvas.width = canvas.clientWidth;
     canvas.height = canvas.clientHeight;
-    const ctx = canvas.getContext('2d');
     ctx.fillStyle = 'white';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const getMousePos = (canvas, event) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
   };
 
   const startDrawing = (event) => {
     if (signatureMode !== 'draw') return;
     const canvas = signatureCanvasRef.current;
-    const ctx = canvas.getContext('2d');
-    const rect = canvas.getBoundingClientRect();
-    ctx.strokeStyle = 'black';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    lastPos.current = getMousePos(canvas, event.nativeEvent);
     setIsDrawing(true);
   };
 
@@ -156,8 +163,16 @@ const SignDocument = () => {
     if (!isDrawing) return;
     const canvas = signatureCanvasRef.current;
     const ctx = canvas.getContext('2d');
-    ctx.lineTo(event.nativeEvent.offsetX, event.nativeEvent.offsetY);
+    const currentPos = getMousePos(canvas, event.nativeEvent);
+    ctx.strokeStyle = '#000000'; // Pure black color
+    ctx.lineWidth = 4; // Bolder line width
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(currentPos.x, currentPos.y);
     ctx.stroke();
+    lastPos.current = currentPos;
   };
 
   const stopDrawing = () => setIsDrawing(false);
@@ -183,8 +198,9 @@ const SignDocument = () => {
     const ctx = canvas.getContext('2d');
     setupSignatureCanvas();
     if (signatureText) {
-      ctx.font = '32px "Brush Script MT", cursive';
-      ctx.fillStyle = 'black';
+      // Bolder and larger font for typed signature
+      ctx.font = 'bold 36px "Brush Script MT", cursive';
+      ctx.fillStyle = '#000000'; // Pure black color
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(signatureText, canvas.width / 2, canvas.height / 2);
@@ -192,9 +208,7 @@ const SignDocument = () => {
   }, [signatureText]);
 
   useEffect(() => {
-    if (signatureMode === 'type') {
-      renderTextSignature();
-    }
+    if (signatureMode === 'type') renderTextSignature();
   }, [signatureText, signatureMode, renderTextSignature]);
 
   const hasValidSignature = () => {
@@ -220,7 +234,6 @@ const SignDocument = () => {
       alert('Please provide a signature first.');
       return;
     }
-
     setSigning(true);
     try {
       let signatureDataUrl;
@@ -229,17 +242,14 @@ const SignDocument = () => {
       } else {
         signatureDataUrl = signatureImage;
       }
-      
       const pdfDocCopy = await PDFDocument.load(await pdfDoc.save());
       const signatureBytes = await fetch(signatureDataUrl).then(res => res.arrayBuffer());
-      
       let signatureImageEmbed;
       try {
         signatureImageEmbed = await pdfDocCopy.embedPng(signatureBytes);
       } catch (e) {
         signatureImageEmbed = await pdfDocCopy.embedJpg(signatureBytes);
       }
-
       for (const area of docDetails.signature_areas) {
         const page = pdfDocCopy.getPage(area.page);
         const { width: pageWidth, height: pageHeight } = page.getSize();
@@ -250,15 +260,13 @@ const SignDocument = () => {
           height: pageHeight * area.height,
         });
       }
-
       const signedPdfBytes = await pdfDocCopy.save();
       const uploadPath = `signed/signed_${Date.now()}_${sanitizeFilename(docDetails.filename)}`;
-      
+      const pdfBlob = new Blob([signedPdfBytes], { type: 'application/pdf' });
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(uploadPath, signedPdfBytes, { contentType: 'application/pdf', upsert: true });
-      if (uploadError) throw uploadError;
-
+        .upload(uploadPath, pdfBlob, { contentType: 'application/pdf', upsert: false }); 
+      if (uploadError) throw new Error(`Storage Upload Failed: ${uploadError.message}`);
       const { error: updateError } = await supabase
         .from('documents')
         .update({
@@ -267,10 +275,8 @@ const SignDocument = () => {
           signed_at: new Date().toISOString(),
         })
         .eq('id', docDetails.id);
-      if (updateError) throw updateError;
-
+      if (updateError) throw new Error(`Database Update Failed: ${updateError.message}`);
       navigate('/signature-success');
-
     } catch (error) {
       console.error('Error signing document:', error);
       alert(`An error occurred while signing: ${error.message}`);
@@ -295,7 +301,6 @@ const SignDocument = () => {
       <header className="bg-white shadow-sm py-3 px-6 text-center border-b z-10">
         <h1 className="text-2xl font-bold text-gray-800">Sign: {docDetails.filename}</h1>
       </header>
-
       <div className="flex flex-1 overflow-hidden">
         <div ref={pdfViewerRef} className="flex-1 flex items-center justify-center p-4 relative bg-gray-200">
             <div className="relative shadow-lg">
@@ -307,11 +312,11 @@ const SignDocument = () => {
                         key={area.id}
                         className="absolute border-2 border-red-500 bg-red-500 bg-opacity-25 flex items-center justify-center text-sm text-red-700 font-bold"
                         style={{
-                        left: `${area.x * 100}%`,
-                        top: `${area.y * 100}%`,
-                        width: `${area.width * 100}%`,
-                        height: `${area.height * 100}%`,
-                        pointerEvents: 'none',
+                          left: `${area.x * 100}%`,
+                          top: `${area.y * 100}%`,
+                          width: `${area.width * 100}%`,
+                          height: `${area.height * 100}%`,
+                          pointerEvents: 'none',
                         }}
                     >
                         Sign Here
@@ -330,7 +335,6 @@ const SignDocument = () => {
                 </div>
             )}
         </div>
-
         <div className="w-full max-w-sm bg-white border-l p-6 overflow-y-auto flex flex-col">
           <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Create Your Signature</h3>
           <div className="flex mb-4 border-b">
@@ -344,7 +348,6 @@ const SignDocument = () => {
               </button>
             ))}
           </div>
-
           <div className="flex-grow">
             {signatureMode === 'draw' && (
                 <canvas ref={signatureCanvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} className="border rounded-md bg-white w-full h-48 cursor-crosshair" />
@@ -365,7 +368,6 @@ const SignDocument = () => {
               </div>
             )}
           </div>
-
           <div className="flex gap-4 mt-6">
             <button onClick={clearSignature} className="flex-1 px-4 py-3 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400">Clear</button>
             <button onClick={submitSignature} disabled={signing || !hasValidSignature()} className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white font-bold rounded-md hover:bg-green-700 disabled:opacity-50">

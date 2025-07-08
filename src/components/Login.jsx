@@ -59,32 +59,32 @@ const Login = () => {
   return (
     <div className="min-h-screen flex font-sans">
       {/* Left Side (Form) */}
-      <div className="w-full lg:w-1/2 bg-[#111827] text-white p-8 sm:p-12 flex flex-col justify-center">
+      <div className="w-full lg:w-1/2 bg-white text-gray-800 p-8 sm:p-12 flex flex-col justify-center">
         <div className="w-full max-w-md mx-auto">
           <h1 className="text-3xl font-bold mb-2">Selamat Datang di Signature</h1>
-          <p className="text-gray-400 mb-8">
+          <p className="text-gray-600 mb-8">
             {isSignUp ? 'Silakan daftar untuk membuat akun.' : 'Silakan masuk untuk melanjutkan'}
           </p>
           
           {notification && (
-            <div className="bg-green-500/20 border border-green-500 text-green-300 p-3 rounded-md mb-6" role="alert">
+            <div className="bg-green-100 border border-green-400 text-green-700 p-3 rounded-md mb-6" role="alert">
               {notification}
             </div>
           )}
 
           {error && (
-             <div className="bg-red-500/20 border border-red-500 text-red-300 p-3 rounded-md mb-6" role="alert">
+             <div className="bg-red-100 border border-red-400 text-red-700 p-3 rounded-md mb-6" role="alert">
               {error}
             </div>
           )}
 
           {/* Social Logins */}
           <div className="flex flex-col sm:flex-row gap-4 mb-8">
-            <button className="w-full bg-[#1F2937] text-gray-300 py-2.5 px-4 rounded-md flex items-center justify-center border border-gray-700 hover:bg-gray-700 transition-colors">
+            <button className="w-full bg-gray-100 text-gray-700 py-2.5 px-4 rounded-md flex items-center justify-center border border-gray-300 hover:bg-gray-200 transition-colors">
               <img src="https://img.icons8.com/color/16/000000/google-logo.png" alt="Google" className="mr-2"/>
               Masuk Dengan Google
             </button>
-            <button className="w-full bg-[#1F2937] text-gray-300 py-2.5 px-4 rounded-md flex items-center justify-center border border-gray-700 hover:bg-gray-700 transition-colors">
+            <button className="w-full bg-gray-100 text-gray-700 py-2.5 px-4 rounded-md flex items-center justify-center border border-gray-300 hover:bg-gray-200 transition-colors">
               <img src="https://img.icons8.com/color/16/000000/facebook-new.png" alt="Facebook" className="mr-2"/>
               Masuk Dengan Facebook
             </button>
@@ -100,7 +100,7 @@ const Login = () => {
                 value={email}
                 required
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-[#1F2937] border border-gray-700 rounded-md py-2.5 pl-8 pr-4 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full bg-gray-100 border border-gray-300 rounded-md py-2.5 pl-8 pr-4 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <div className="mb-6 relative">
@@ -113,7 +113,7 @@ const Login = () => {
                 value={password}
                 required
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#1F2937] border border-gray-700 rounded-md py-2.5 pl-9 pr-4 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className="w-full bg-gray-100 border border-gray-300 rounded-md py-2.5 pl-9 pr-4 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             <button
@@ -126,7 +126,7 @@ const Login = () => {
           </form>
 
           {/* Toggle Form */}
-          <p className="text-center text-gray-400 mt-6">
+          <p className="text-center text-gray-600 mt-6">
             {isSignUp ? 'Sudah mempunyai akun? ' : 'Belum mempunyai akun? '}
             <a href="#" onClick={toggleFormMode} className="text-blue-500 hover:underline">
               {isSignUp ? 'Masuk' : 'Daftar'}
