@@ -1,631 +1,383 @@
 
-import React, { useState, useEffect, useRef } from 'react'
-import { useParams } from 'react-router-dom'
-import { supabase } from '../config/supabase'
-import { PDFDocument, rgb } from 'pdf-lib'
-import { Save, Upload } from 'lucide-react'
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { supabase } from '../config/supabase';
+import { PDFDocument } from 'pdf-lib';
+import { Save, Upload } from 'lucide-react';
+
+const sanitizeFilename = (filename) => {
+  return filename.replace(/[^a-zA-Z0-9_.-]/g, '_');
+};
+
+const isValidUUID = (uuid) => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
+};
 
 const SignDocument = () => {
-  const { documentId } = useParams()
-  const canvasRef = useRef(null)
-  const signatureCanvasRef = useRef(null)
-  const [document, setDocument] = useState(null)
-  const [pdfDoc, setPdfDoc] = useState(null)
-  const [pdfBytes, setPdfBytes] = useState(null)
-  const [currentPage, setCurrentPage] = useState(0)
-  const [totalPages, setTotalPages] = useState(0)
-  const [signatureMode, setSignatureMode] = useState('draw')
-  const [signatureText, setSignatureText] = useState('')
-  const [signatureImage, setSignatureImage] = useState(null)
-  const [isDrawing, setIsDrawing] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [signing, setSigning] = useState(false)
-  const [scale, setScale] = useState(1)
+  const { documentId } = useParams();
+  const navigate = useNavigate();
+  const canvasRef = useRef(null);
+  const signatureCanvasRef = useRef(null);
+  const pdfViewerRef = useRef(null);
+  const renderTaskRef = useRef(null);
+  
+  const [docDetails, setDocDetails] = useState(null);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [pdfJsDoc, setPdfJsDoc] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [signatureMode, setSignatureMode] = useState('draw');
+  const [signatureText, setSignatureText] = useState('');
+  const [signatureImage, setSignatureImage] = useState(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [signing, setSigning] = useState(false);
+  const lastPos = useRef({});
 
-  useEffect(() => {
-    // Initialize PDF.js worker
-    const initializePdfJs = () => {
-      if (typeof window !== 'undefined' && window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-        console.log('PDF.js worker configured')
-      } else {
-        // Retry after a short delay if PDF.js is not loaded yet
-        setTimeout(initializePdfJs, 100)
-      }
-    }
-    
-    initializePdfJs()
-    loadDocument()
-  }, [documentId])
-
-  const loadDocument = async () => {
+  const loadDocument = useCallback(async () => {
+    setLoading(true);
     try {
-      console.log('Loading document with public link:', documentId)
-      
-      if (!documentId) {
-        console.error('No document ID provided')
-        setDocument(null)
-        setLoading(false)
-        return
+      if (!documentId || !isValidUUID(documentId)) {
+        throw new Error("Invalid document link.");
+    }
+      const { data: docData, error: docError } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('public_link', documentId)
+        .single();
+      if (docError || !docData) throw new Error("Document not found or link is invalid.");
+      setDocDetails(docData);
+      const { data: fileData, error: fileError } = await supabase.storage
+        .from('documents')
+        .download(docData.file_path);
+      if (fileError) throw new Error(`Failed to download document file: ${fileError.message}`);
+      const arrayBuffer = await fileData.arrayBuffer();
+      const pdf = await PDFDocument.load(arrayBuffer);
+      setPdfDoc(pdf);
+      if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${window.pdfjsLib.version}/pdf.worker.min.js`;
       }
-      
-      // Add retry logic for network issues
-      let retries = 3
-      let docData = null
-      let docError = null
-      
-      while (retries > 0 && !docData) {
-        try {
-          const result = await supabase
-            .from('documents')
-            .select('*')
-            .eq('public_link', documentId)
-            .single()
-          
-          docData = result.data
-          docError = result.error
-          break
-        } catch (fetchError) {
-          console.error(`Fetch attempt failed, retries left: ${retries - 1}`, fetchError)
-          retries--
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000))
-          } else {
-            docError = fetchError
-          }
-        }
-      }
-
-      if (docError || !docData) {
-        console.error('Database error:', docError)
-        setDocument(null)
-        setLoading(false)
-        return
-      }
-      
-      console.log('Document data:', docData)
-      setDocument(docData)
-
-      console.log('Attempting to download file:', docData.file_path)
-      
-      // Retry file download too
-      retries = 3
-      let fileData = null
-      let fileError = null
-      
-      while (retries > 0 && !fileData) {
-        try {
-          const result = await supabase.storage
-            .from('documents')
-            .download(docData.file_path)
-          
-          fileData = result.data
-          fileError = result.error
-          break
-        } catch (downloadError) {
-          console.error(`Download attempt failed, retries left: ${retries - 1}`, downloadError)
-          retries--
-          if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000))
-          } else {
-            fileError = downloadError
-          }
-        }
-      }
-
-      if (fileError || !fileData) {
-        console.error('Storage error:', fileError)
-        setDocument(null)
-        setLoading(false)
-        return
-      }
-
-      const arrayBuffer = await fileData.arrayBuffer()
-      const bytes = new Uint8Array(arrayBuffer)
-      setPdfBytes(bytes)
-      
-      try {
-        const pdf = await PDFDocument.load(arrayBuffer)
-        setPdfDoc(pdf)
-        setTotalPages(pdf.getPageCount())
-      } catch (pdfError) {
-        console.error('PDF loading error:', pdfError)
-        // Continue anyway, we'll use fallback rendering
-        setTotalPages(1)
-      }
-      
-      // Wait a bit before rendering to ensure canvas is ready
-      setTimeout(async () => {
-        try {
-          await renderPage(0, bytes)
-          setupSignatureCanvas()
-        } catch (renderError) {
-          console.error('Error rendering page:', renderError)
-          // Try fallback rendering
-          renderSimplePage(0)
-          setupSignatureCanvas()
-        }
-      }, 300)
-      
-      setLoading(false)
+      const pdfJs = await window.pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+      setPdfJsDoc(pdfJs);
+      setupSignatureCanvas();
     } catch (error) {
-      console.error('Error loading document:', error)
-      setDocument(null)
-      setLoading(false)
+      console.error('Error loading document:', error);
+      setDocDetails(null);
+    } finally {
+      setLoading(false);
     }
-  }
+  }, [documentId]);
+  
+  useEffect(() => {
+    loadDocument();
+  }, [loadDocument]);
 
-  const renderPage = async (pageIndex, bytes = pdfBytes) => {
-    if (!bytes) {
-      console.log('No bytes available for rendering')
-      return
+  const renderPage = useCallback(async (pageNumber) => {
+    if (!pdfJsDoc || !canvasRef.current || !pdfViewerRef.current) return;
+    if (renderTaskRef.current) {
+      renderTaskRef.current.cancel();
     }
-
-    const canvas = canvasRef.current
-    if (!canvas) {
-      console.log('Canvas not available')
-      return
-    }
-
     try {
-      // Use PDF.js for rendering
-      const pdfjsLib = window.pdfjsLib
-      if (!pdfjsLib) {
-        console.log('PDF.js not available, using fallback')
-        renderSimplePage(pageIndex)
-        return
-      }
+      const page = await pdfJsDoc.getPage(pageNumber);
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      const container = pdfViewerRef.current;
+      
+      const viewport = page.getViewport({ scale: 1 });
+      const rotation = page.rotate;
+      
+      const rotatedViewport = page.getViewport({ scale: 1, rotation });
+      const scale = Math.min(
+        (container.clientWidth - 32) / rotatedViewport.width,
+        (container.clientHeight - 32) / rotatedViewport.height
+      );
+      const scaledViewport = page.getViewport({ scale, rotation });
 
-      console.log('Rendering page with PDF.js:', pageIndex + 1)
-      
-      // Ensure PDF.js worker is set
-      if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-      }
-      
-      // Load PDF document
-      const loadingTask = pdfjsLib.getDocument({ 
-        data: bytes,
-        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-        cMapPacked: true
-      })
-      
-      const pdf = await loadingTask.promise
-      const page = await pdf.getPage(pageIndex + 1)
-      
-      const ctx = canvas.getContext('2d')
-      
-      const viewport = page.getViewport({ scale: 1.5 })
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      
-      setScale(1.5)
-      
+      canvas.width = scaledViewport.width;
+      canvas.height = scaledViewport.height;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+
       const renderContext = {
         canvasContext: ctx,
-        viewport: viewport
-      }
+        viewport: scaledViewport
+      };
       
-      await page.render(renderContext).promise
-      console.log('Page rendered successfully')
+      renderTaskRef.current = page.render(renderContext);
+      await renderTaskRef.current.promise;
+      renderTaskRef.current = null;
     } catch (error) {
-      console.error('Error rendering PDF with PDF.js:', error)
-      console.log('Falling back to simple page rendering')
-      renderSimplePage(pageIndex)
-    }
-  }
-
-  const renderSimplePage = (pageIndex) => {
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    
-    canvas.width = 800
-    canvas.height = 1000
-    setScale(1)
-    
-    ctx.fillStyle = 'white'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    
-    ctx.fillStyle = '#f8f9fa'
-    ctx.fillRect(20, 20, canvas.width - 40, canvas.height - 40)
-    
-    ctx.fillStyle = 'black'
-    ctx.font = '24px Arial'
-    ctx.textAlign = 'center'
-    ctx.fillText(`PDF Page ${pageIndex + 1}`, canvas.width / 2, 60)
-    
-    ctx.font = '16px Arial'
-    ctx.fillText('Please create your signature and submit', canvas.width / 2, 100)
-    
-    ctx.strokeStyle = '#ddd'
-    ctx.lineWidth = 2
-    ctx.strokeRect(0, 0, canvas.width, canvas.height)
-  }
-
-  const setupSignatureCanvas = () => {
-    const canvas = signatureCanvasRef.current
-    if (!canvas) return
-    
-    canvas.width = 400
-    canvas.height = 150
-    const ctx = canvas.getContext('2d')
-    ctx.fillStyle = 'white'
-    ctx.fillRect(0, 0, canvas.width, canvas.height)
-    ctx.strokeStyle = '#ddd'
-    ctx.strokeRect(0, 0, canvas.width, canvas.height)
-  }
-
-  const startDrawing = (event) => {
-    if (signatureMode !== 'draw') return
-    setIsDrawing(true)
-    draw(event)
-  }
-
-  const draw = (event) => {
-    if (!isDrawing || signatureMode !== 'draw') return
-    
-    const canvas = signatureCanvasRef.current
-    const ctx = canvas.getContext('2d')
-    const rect = canvas.getBoundingClientRect()
-    
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    
-    ctx.lineWidth = 2
-    ctx.lineCap = 'round'
-    ctx.strokeStyle = 'black'
-    
-    ctx.lineTo(x, y)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(x, y)
-  }
-
-  const stopDrawing = () => {
-    if (!isDrawing) return
-    setIsDrawing(false)
-    const ctx = signatureCanvasRef.current.getContext('2d')
-    ctx.beginPath()
-  }
-
-  const clearSignature = () => {
-    setupSignatureCanvas()
-    setSignatureText('')
-    setSignatureImage(null)
-  }
-
-  const handleImageUpload = (event) => {
-    const file = event.target.files[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setSignatureImage(e.target.result)
+      if (error.name === 'RenderingCancelledException') {
+        console.warn(`Page render cancelled for page ${pageNumber}.`);
+      } else {
+        console.error(`Failed to render page ${pageNumber}:`, error);
       }
-      reader.readAsDataURL(file)
     }
-  }
-
-  const renderTextSignature = () => {
-    if (!signatureText) return
-    
-    const canvas = signatureCanvasRef.current
-    const ctx = canvas.getContext('2d')
-    
-    setupSignatureCanvas()
-    
-    ctx.font = '32px Brush Script MT, cursive'
-    ctx.fillStyle = 'black'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(signatureText, canvas.width / 2, canvas.height / 2)
-  }
+  }, [pdfJsDoc]);
 
   useEffect(() => {
-    if (signatureMode === 'type' && signatureText) {
-      renderTextSignature()
+    if (pdfJsDoc) renderPage(currentPage);
+  }, [currentPage, pdfJsDoc, renderPage]);
+
+  useEffect(() => {
+    const resizeObserver = new ResizeObserver(() => {
+      if (pdfJsDoc) renderPage(currentPage);
+    });
+    const viewer = pdfViewerRef.current;
+    if (viewer) resizeObserver.observe(viewer);
+    return () => {
+      if (viewer) resizeObserver.unobserve(viewer);
+      if (renderTaskRef.current) {
+        renderTaskRef.current.cancel();
+        renderTaskRef.current = null;
+      }
+    };
+  }, [currentPage, pdfJsDoc, renderPage]);
+
+  const setupSignatureCanvas = () => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  };
+
+  const getMousePos = (canvas, event) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  };
+
+  const startDrawing = (event) => {
+    if (signatureMode !== 'draw') return;
+    const canvas = signatureCanvasRef.current;
+    lastPos.current = getMousePos(canvas, event.nativeEvent);
+    setIsDrawing(true);
+  };
+
+  const draw = (event) => {
+    if (!isDrawing) return;
+    const canvas = signatureCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const currentPos = getMousePos(canvas, event.nativeEvent);
+    ctx.strokeStyle = '#000000'; // Pure black color
+    ctx.lineWidth = 4; // Bolder line width
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(currentPos.x, currentPos.y);
+    ctx.stroke();
+    lastPos.current = currentPos;
+  };
+
+  const stopDrawing = () => setIsDrawing(false);
+  
+  const clearSignature = () => {
+    setupSignatureCanvas();
+    setSignatureText('');
+    setSignatureImage(null);
+  };
+
+  const handleImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setSignatureImage(e.target.result);
+      reader.readAsDataURL(file);
     }
-  }, [signatureText, signatureMode])
+  };
+
+  const renderTextSignature = useCallback(() => {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    setupSignatureCanvas();
+    if (signatureText) {
+      // Bolder and larger font for typed signature
+      ctx.font = 'bold 36px "Brush Script MT", cursive';
+      ctx.fillStyle = '#000000'; // Pure black color
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(signatureText, canvas.width / 2, canvas.height / 2);
+    }
+  }, [signatureText]);
+
+  useEffect(() => {
+    if (signatureMode === 'type') renderTextSignature();
+  }, [signatureText, signatureMode, renderTextSignature]);
 
   const hasValidSignature = () => {
+    if (signatureMode === 'type') return signatureText.trim().length > 0;
+    if (signatureMode === 'upload') return signatureImage !== null;
     if (signatureMode === 'draw') {
-      const canvas = signatureCanvasRef.current
-      const ctx = canvas.getContext('2d')
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const data = imageData.data
-      
-      // Check if canvas has any non-white pixels (indicating drawing)
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] !== 255 || data[i + 1] !== 255 || data[i + 2] !== 255) {
-          return true
-        }
-      }
-      return false
-    } else if (signatureMode === 'type') {
-      return signatureText.trim().length > 0
-    } else if (signatureMode === 'upload') {
-      return signatureImage !== null
+      const canvas = signatureCanvasRef.current;
+      if (!canvas) return false;
+      const blank = document.createElement('canvas');
+      blank.width = canvas.width;
+      blank.height = canvas.height;
+      return canvas.toDataURL() !== blank.toDataURL();
     }
-    return false
-  }
+    return false;
+  };
 
   const submitSignature = async () => {
-    if (!document || !pdfDoc) {
-      alert('Document not loaded properly')
-      return
+    if (!docDetails || !pdfDoc) {
+      alert('Document not loaded properly.');
+      return;
     }
-
     if (!hasValidSignature()) {
-      alert('Please create a signature first')
-      return
+      alert('Please provide a signature first.');
+      return;
     }
-
-    setSigning(true)
+    setSigning(true);
     try {
-      let signatureDataUrl = ''
-      
+      let signatureDataUrl;
       if (signatureMode === 'draw' || signatureMode === 'type') {
-        signatureDataUrl = signatureCanvasRef.current.toDataURL('image/png')
-      } else if (signatureMode === 'upload' && signatureImage) {
-        signatureDataUrl = signatureImage
+        signatureDataUrl = signatureCanvasRef.current.toDataURL('image/png');
+      } else {
+        signatureDataUrl = signatureImage;
       }
-
-      if (!signatureDataUrl) {
-        alert('Please create a signature first')
-        setSigning(false)
-        return
-      }
-
-      // Load the original PDF document
-      const pdfDocCopy = await PDFDocument.load(await pdfDoc.save())
-      
-      const signatureAreas = document.signature_areas || []
-      
-      if (signatureAreas.length === 0) {
-        alert('No signature areas found in this document')
-        setSigning(false)
-        return
-      }
-
-      // Convert signature image to PNG bytes
-      const response = await fetch(signatureDataUrl)
-      const signatureBytes = await response.arrayBuffer()
-      
-      let signatureImageEmbed
+      const pdfDocCopy = await PDFDocument.load(await pdfDoc.save());
+      const signatureBytes = await fetch(signatureDataUrl).then(res => res.arrayBuffer());
+      let signatureImageEmbed;
       try {
-        // Try PNG first
-        signatureImageEmbed = await pdfDocCopy.embedPng(signatureBytes)
-      } catch (error) {
-        try {
-          // If PNG fails, try JPG
-          signatureImageEmbed = await pdfDocCopy.embedJpg(signatureBytes)
-        } catch (error) {
-          throw new Error('Failed to embed signature image')
-        }
+        signatureImageEmbed = await pdfDocCopy.embedPng(signatureBytes);
+      } catch (e) {
+        signatureImageEmbed = await pdfDocCopy.embedJpg(signatureBytes);
       }
-      
-      // Apply signature to all designated areas
-      for (const area of signatureAreas) {
-        const page = pdfDocCopy.getPage(area.page)
-        const { width, height } = page.getSize()
-        
-        const signatureWidth = width * area.width
-        const signatureHeight = height * area.height
-        const x = width * area.x
-        const y = height * (1 - area.y - area.height)
-        
+      for (const area of docDetails.signature_areas) {
+        const page = pdfDocCopy.getPage(area.page);
+        const { width: pageWidth, height: pageHeight } = page.getSize();
         page.drawImage(signatureImageEmbed, {
-          x,
-          y,
-          width: signatureWidth,
-          height: signatureHeight,
-        })
+          x: pageWidth * area.x,
+          y: pageHeight * (1 - area.y - area.height),
+          width: pageWidth * area.width,
+          height: pageHeight * area.height,
+        });
       }
-
-      const signedPdfBytes = await pdfDocCopy.save()
-      const signedFileName = `signed_${document.filename}`
-      
+      const signedPdfBytes = await pdfDocCopy.save();
+      const uploadPath = `signed/signed_${Date.now()}_${sanitizeFilename(docDetails.filename)}`;
+      const pdfBlob = new Blob([signedPdfBytes], { type: 'application/pdf' });
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(`signed/${signedFileName}`, signedPdfBytes, {
-          contentType: 'application/pdf',
-          upsert: true
-        })
-
-      if (uploadError) throw uploadError
-
+        .upload(uploadPath, pdfBlob, { contentType: 'application/pdf', upsert: false }); 
+      if (uploadError) throw new Error(`Storage Upload Failed: ${uploadError.message}`);
       const { error: updateError } = await supabase
         .from('documents')
         .update({
           status: 'signed',
           signed_file_path: uploadData.path,
-          signed_at: new Date().toISOString()
+          signed_at: new Date().toISOString(),
         })
-        .eq('id', document.id)
-
-      if (updateError) throw updateError
-
-      alert('Document signed successfully! You can now close this window.')
-      
+        .eq('id', docDetails.id);
+      if (updateError) throw new Error(`Database Update Failed: ${updateError.message}`);
+      navigate('/signature-success');
     } catch (error) {
-      console.error('Error signing document:', error)
-      alert(`Error signing document: ${error.message}`)
+      console.error('Error signing document:', error);
+      alert(`An error occurred while signing: ${error.message}`);
     } finally {
-      setSigning(false)
+      setSigning(false);
     }
-  }
+  };
 
-  if (loading) return (
-    <div className="loading" style={{ padding: '2rem', textAlign: 'center' }}>
-      <p>Loading document...</p>
+  const totalPages = pdfJsDoc?.numPages || 0;
+
+  if (loading) return <div className="flex justify-center items-center h-screen text-lg font-semibold">Loading Document...</div>;
+  if (!docDetails) return (
+    <div className="flex flex-col justify-center items-center h-screen text-center p-4">
+        <h2 className="text-2xl font-bold text-red-600 mb-4">Document Not Found</h2>
+        <p className="text-gray-600">The link may be invalid, or the document may have been removed.</p>
+        <button onClick={() => navigate('/')} className="mt-6 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600">Go Home</button>
     </div>
-  )
-
-  if (!document && !loading) {
-    return (
-      <div className="error" style={{ padding: '2rem', textAlign: 'center' }}>
-        <h2>Document Not Found</h2>
-        <p>The document you're looking for could not be found or the link has expired.</p>
-        <p>Please check the link and try again.</p>
-        <button 
-          onClick={() => window.location.reload()} 
-          style={{ 
-            marginTop: '1rem', 
-            padding: '0.5rem 1rem', 
-            background: '#007bff', 
-            color: 'white', 
-            border: 'none', 
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Refresh Page
-        </button>
-      </div>
-    )
-  }
+  );
 
   return (
-    <div className="sign-document">
-      <header className="sign-header">
-        <h1>Sign Document: {document.filename}</h1>
-        <p>Recipient: {document.recipient_email}</p>
-        <p>Document sent by sender</p>
+    <div className="flex flex-col h-screen bg-gray-100">
+      <header className="bg-white shadow-sm py-3 px-6 text-center border-b z-10">
+        <h1 className="text-2xl font-bold text-gray-800">Sign: {docDetails.filename}</h1>
       </header>
-
-      <div className="sign-content">
-        <div className="pdf-viewer">
-          <canvas ref={canvasRef} className="pdf-canvas" />
-          
-          {document.signature_areas
-            ?.filter(area => area.page === currentPage)
-            .map((area) => (
-              <div
-                key={area.id}
-                className="signature-required"
-                style={{
-                  left: `${area.x * 100}%`,
-                  top: `${area.y * 100}%`,
-                  width: `${area.width * 100}%`,
-                  height: `${area.height * 100}%`
-                }}
-              >
-                Sign Here
-              </div>
-            ))}
-          
-          <div className="page-controls">
-            <button
-              onClick={() => {
-                const newPage = Math.max(0, currentPage - 1)
-                setCurrentPage(newPage)
-                renderPage(newPage)
-              }}
-              disabled={currentPage === 0}
-            >
-              Previous
-            </button>
-            <span>Page {currentPage + 1} of {totalPages}</span>
-            <button
-              onClick={() => {
-                const newPage = Math.min(totalPages - 1, currentPage + 1)
-                setCurrentPage(newPage)
-                renderPage(newPage)
-              }}
-              disabled={currentPage === totalPages - 1}
-            >
-              Next
-            </button>
-          </div>
+      <div className="flex flex-1 overflow-hidden">
+        <div ref={pdfViewerRef} className="flex-1 flex items-center justify-center p-4 relative bg-gray-200">
+            <div className="relative shadow-lg">
+                <canvas ref={canvasRef} className="bg-white" />
+                {docDetails.signature_areas
+                    ?.filter(area => area.page === currentPage - 1)
+                    .map((area) => (
+                    <div
+                        key={area.id}
+                        className="absolute border-2 border-red-500 bg-red-500 bg-opacity-25 flex items-center justify-center text-sm text-red-700 font-bold"
+                        style={{
+                          left: `${area.x * 100}%`,
+                          top: `${area.y * 100}%`,
+                          width: `${area.width * 100}%`,
+                          height: `${area.height * 100}%`,
+                          pointerEvents: 'none',
+                        }}
+                    >
+                        Sign Here
+                    </div>
+                ))}
+            </div>
+            {totalPages > 1 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center bg-white p-2 rounded-lg shadow-2xl">
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage <= 1} className="px-4 py-2 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50">
+                        Previous
+                    </button>
+                    <span className="font-semibold text-gray-800 px-4">Page {currentPage} of {totalPages}</span>
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="px-4 py-2 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50">
+                        Next
+                    </button>
+                </div>
+            )}
         </div>
-
-        <div className="signature-panel">
-          <h3>Create Your Signature</h3>
-          
-          <div className="signature-mode-tabs">
-            <button
-              className={signatureMode === 'draw' ? 'active' : ''}
-              onClick={() => setSignatureMode('draw')}
-            >
-              Draw
-            </button>
-            <button
-              className={signatureMode === 'type' ? 'active' : ''}
-              onClick={() => setSignatureMode('type')}
-            >
-              Type
-            </button>
-            <button
-              className={signatureMode === 'upload' ? 'active' : ''}
-              onClick={() => setSignatureMode('upload')}
-            >
-              Upload
-            </button>
+        <div className="w-full max-w-sm bg-white border-l p-6 overflow-y-auto flex flex-col">
+          <h3 className="text-xl font-bold text-gray-800 mb-4 text-center">Create Your Signature</h3>
+          <div className="flex mb-4 border-b">
+            {['draw', 'type', 'upload'].map(mode => (
+              <button
+                key={mode}
+                className={`flex-1 py-2 font-medium capitalize ${signatureMode === mode ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}
+                onClick={() => setSignatureMode(mode)}
+              >
+                {mode}
+              </button>
+            ))}
           </div>
-
-          {signatureMode === 'draw' && (
-            <div className="signature-draw">
-              <p className="instruction">Draw your signature in the box below:</p>
-              <canvas
-                ref={signatureCanvasRef}
-                onMouseDown={startDrawing}
-                onMouseMove={draw}
-                onMouseUp={stopDrawing}
-                onMouseLeave={stopDrawing}
-                className="signature-canvas"
-              />
-            </div>
-          )}
-
-          {signatureMode === 'type' && (
-            <div className="signature-type">
-              <p className="instruction">Type your signature:</p>
-              <input
-                type="text"
-                value={signatureText}
-                onChange={(e) => setSignatureText(e.target.value)}
-                placeholder="Type your signature"
-                className="signature-text-input"
-              />
-              <canvas ref={signatureCanvasRef} className="signature-canvas" />
-            </div>
-          )}
-
-          {signatureMode === 'upload' && (
-            <div className="signature-upload">
-              <p className="instruction">Upload your signature image:</p>
-              <label className="upload-signature-btn">
-                <Upload size={20} />
-                Upload Signature Image
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  style={{ display: 'none' }}
-                />
-              </label>
-              {signatureImage && (
-                <img src={signatureImage} alt="Signature" className="signature-preview" />
-              )}
-            </div>
-          )}
-
-          <div className="signature-actions">
-            <button onClick={clearSignature} className="clear-btn">
-              Clear
-            </button>
-            <button
-              onClick={submitSignature}
-              disabled={signing || !hasValidSignature()}
-              className="submit-signature-btn"
-            >
-              <Save size={16} />
-              {signing ? 'Submitting...' : 'Submit Signature'}
+          <div className="flex-grow">
+            {signatureMode === 'draw' && (
+                <canvas ref={signatureCanvasRef} onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing} className="border rounded-md bg-white w-full h-48 cursor-crosshair" />
+            )}
+            {signatureMode === 'type' && (
+              <div className="flex flex-col h-full">
+                <input type="text" value={signatureText} onChange={(e) => setSignatureText(e.target.value)} placeholder="Type your name" className="w-full p-2 border rounded-md mb-2" />
+                <canvas ref={signatureCanvasRef} className="border rounded-md bg-gray-50 w-full flex-grow" />
+              </div>
+            )}
+            {signatureMode === 'upload' && (
+              <div className="text-center">
+                <label className="flex items-center justify-center gap-2 px-4 py-3 bg-blue-500 text-white rounded-md cursor-pointer hover:bg-blue-600 w-full">
+                  <Upload size={20} /> Upload Image
+                  <input type="file" accept="image/png, image/jpeg" onChange={handleImageUpload} className="hidden" />
+                </label>
+                {signatureImage && <img src={signatureImage} alt="Signature Preview" className="mt-4 max-w-full max-h-36 border p-1 inline-block" />}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-4 mt-6">
+            <button onClick={clearSignature} className="flex-1 px-4 py-3 bg-gray-300 text-gray-800 rounded-md hover:bg-gray-400">Clear</button>
+            <button onClick={submitSignature} disabled={signing || !hasValidSignature()} className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-green-600 text-white font-bold rounded-md hover:bg-green-700 disabled:opacity-50">
+              <Save size={18} /> {signing ? 'Submitting...' : 'Sign and Submit'}
             </button>
           </div>
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default SignDocument
+export default SignDocument;

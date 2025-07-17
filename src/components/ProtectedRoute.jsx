@@ -7,7 +7,11 @@ const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth()
 
   if (loading) {
-    return <div className="loading">Loading...</div>
+    return (
+      <div className="flex justify-center items-center h-screen text-lg text-gray-600">
+        Loading...
+      </div>
+    )
   }
 
   return user ? children : <Navigate to="/login" />

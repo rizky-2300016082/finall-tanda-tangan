@@ -1,105 +1,126 @@
-import React from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './contexts/AuthContext'
-import ProtectedRoute from './components/ProtectedRoute'
-import Login from './components/Login'
-import Dashboard from './components/Dashboard'
-import DocumentEditor from './components/DocumentEditor'
-import SignDocument from './components/SignDocument'
-import './App.css'
+
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+import DocumentEditor from './components/DocumentEditor';
+import SignDocument from './components/SignDocument';
+import LandingPage from './components/LandingPage';
+import SignatureSuccess from './components/SignatureSuccess';
+import Security from './components/Security';
+import Contacts from './components/Contacts';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
   constructor(props) {
-    super(props)
-    this.state = { hasError: false, error: null }
+    super(props);
+    this.state = { hasError: false, error: null };
   }
 
   static getDerivedStateFromError(error) {
-    return { hasError: true, error }
+    return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo)
+    console.error('Error caught by boundary:', error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ 
-          padding: '2rem', 
-          textAlign: 'center',
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center'
-        }}>
-          <h1>Something went wrong</h1>
-          <p>Please refresh the page and try again.</p>
-          <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '1rem' }}>
+        <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center">
+          <h1 className="text-3xl font-bold text-red-600 mb-4">Something went wrong</h1>
+          <p className="text-gray-700 text-lg mb-6">Please refresh the page and try again.</p>
+          <p className="text-gray-500 text-sm mb-4">
             Error: {this.state.error?.message || 'Unknown error'}
           </p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '16px'
-            }}
+            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-md shadow-md hover:bg-blue-700 transition-colors duration-200"
           >
             Refresh Page
           </button>
         </div>
-      )
+      );
     }
 
-    return this.props.children
+    return this.props.children;
   }
 }
 
+const AppRoutes = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-lg">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={!user ? <LandingPage /> : <Navigate to="/dashboard" />} />
+      <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
+      <Route path="/sign/:documentId" element={<SignDocument />} />
+      <Route path="/signature-success" element={<SignatureSuccess />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/editor/:documentId"
+        element={
+          <ProtectedRoute>
+            <DocumentEditor />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/security"
+        element={
+          <ProtectedRoute>
+            <Security />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/contacts"
+        element={
+          <ProtectedRoute>
+            <Contacts />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="*" element={
+        <div className="flex flex-col items-center justify-center min-h-screen p-8 text-center">
+          <h1 className="text-3xl font-bold text-gray-800 mb-4">Page Not Found</h1>
+          <p className="text-gray-600 text-lg">The page you're looking for doesn't exist.</p>
+        </div>
+      } />
+    </Routes>
+  );
+};
+
 function App() {
   return (
-    <ErrorBoundary>
+    <Router>
       <AuthProvider>
-        <Router>
+        <ErrorBoundary>
           <div className="App">
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/sign/:documentId" element={<SignDocument />} />
-              <Route
-                path="/dashboard"
-                element={
-                  <ProtectedRoute>
-                    <Dashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/editor/:documentId"
-                element={
-                  <ProtectedRoute>
-                    <DocumentEditor />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="*" element={
-                <div style={{ padding: '2rem', textAlign: 'center' }}>
-                  <h1>Page Not Found</h1>
-                  <p>The page you're looking for doesn't exist.</p>
-                </div>
-              } />
-            </Routes>
+            <AppRoutes />
           </div>
-        </Router>
+        </ErrorBoundary>
       </AuthProvider>
-    </ErrorBoundary>
-  )
+    </Router>
+  );
 }
 
-export default App
+export default App;
