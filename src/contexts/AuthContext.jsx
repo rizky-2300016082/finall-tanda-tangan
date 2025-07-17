@@ -16,6 +16,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // This function is kept for cases where a manual refresh is desired,
+  // but it will be replaced by a more direct state update for profile changes.
   const refreshUser = async () => {
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     setUser(currentUser);
@@ -45,7 +47,6 @@ export const AuthProvider = ({ children }) => {
       email,
       password,
       options: {
-        // Initialize user metadata on sign-up
         data: {
           full_name: 'New User',
           phone: '',
@@ -70,7 +71,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updatePassword = async (oldPassword, newPassword) => {
-    // 1. Re-authenticate user with their old password
     const { error: reauthError } = await supabase.auth.signInWithPassword({
       email: user.email,
       password: oldPassword,
@@ -80,7 +80,6 @@ export const AuthProvider = ({ children }) => {
       throw new Error('Old password is not correct');
     }
   
-    // 2. Update the user's password to the new one
     const { data, error: updateError } = await supabase.auth.updateUser({
       password: newPassword,
     });
@@ -93,22 +92,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   const deleteUser = async () => {
-    // Client-side deletion is not directly possible for security reasons.
-    // This function simulates deletion by signing the user out.
-    // A real implementation would require a Supabase Edge Function.
     console.log("Simulating user deletion by signing out.");
     return await signOut();
   };
 
   const value = {
     user,
+    setUser, // Expose the state setter function
     signUp,
     signIn,
     signOut,
     updatePassword,
     deleteUser,
     loading,
-    refreshUser // Expose the refresh function
+    refreshUser
   };
 
   return (

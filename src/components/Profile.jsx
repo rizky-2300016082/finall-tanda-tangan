@@ -3,24 +3,21 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../config/supabase';
 
 const Profile = ({ user }) => {
-  const { refreshUser } = useAuth();
+  const { setUser } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Form state
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [signature, setSignature] = useState('');
 
-  // Initialize form state when user data is available or changes
   useEffect(() => {
     if (user) {
       setFullName(user.user_metadata?.full_name || '');
-      // These fields are mocked for now but can be added to user_metadata
-      setPhone(user.user_metadata?.phone || '087788652910');
-      setSignature(user.user_metadata?.signature || 'madaihsan');
+      setPhone(user.user_metadata?.phone || '');
+      setSignature(user.user_metadata?.signature || '');
     }
   }, [user]);
 
@@ -36,32 +33,105 @@ const Profile = ({ user }) => {
     setError('');
     setSuccess('');
 
-    // Update user metadata in Supabase Auth
     const { data, error: updateError } = await supabase.auth.updateUser({
       data: { 
         full_name: fullName,
-        phone: phone, // Persisting mocked data
-        signature: signature // Persisting mocked data
+        phone: phone,
+        signature: signature,
       }
     });
 
     setLoading(false);
 
     if (updateError) {
-      console.error('Error updating profile:', updateError);
       setError(`Failed to update profile: ${updateError.message}`);
-    } else {
+    } else if (data.user) {
+      setUser(data.user);
       setSuccess('Profile updated successfully!');
       setIsEditing(false);
-      // Refresh the user context to get the latest data
-      await refreshUser();
     }
   };
+
+  const handleAvatarUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    const oldAvatarUrl = user?.user_metadata?.avatar_url;
+    const newAvatarPath = `${user.id}/${Date.now()}_${file.name}`;
+
+    // Step 1: Upload the new avatar
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(newAvatarPath, file);
+
+    if (uploadError) {
+      setError(`Upload failed: ${uploadError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    // Step 2: Get the public URL for the new file
+    const { data: urlData } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(newAvatarPath);
+
+    const newPublicUrl = urlData.publicUrl;
+
+    // Step 3: Update user metadata with the new URL
+    const { data: updatedUserData, error: updateError } = await supabase.auth.updateUser({
+      data: { avatar_url: newPublicUrl }
+    });
+
+    if (updateError) {
+      setError(`Failed to update your profile: ${updateError.message}`);
+      // If profile update fails, delete the newly uploaded file to prevent orphans
+      await supabase.storage.from('avatars').remove([newAvatarPath]);
+      setLoading(false);
+      return;
+    }
+    
+    // Step 4: If everything was successful, update the UI and delete the old avatar.
+    setUser(updatedUserData.user);
+    setSuccess('Avatar updated successfully!');
+
+    if (oldAvatarUrl) {
+      try {
+        // Correctly parse the URL and extract the path for deletion
+        const urlObject = new URL(oldAvatarUrl);
+        const oldAvatarPath = urlObject.pathname.split('/avatars/')[1];
+        
+        if (oldAvatarPath) {
+          console.log(`Attempting to delete old avatar at path: ${oldAvatarPath}`);
+          const { error: deleteError } = await supabase.storage
+            .from('avatars')
+            .remove([oldAvatarPath]);
+          
+          if (deleteError) {
+            console.error("Failed to delete old avatar:", deleteError);
+            // This is not a critical error, so we just log it and alert the user.
+            setError("New avatar set, but failed to remove the old one.");
+          } else {
+            console.log(`Successfully deleted old avatar: ${oldAvatarPath}`);
+          }
+        }
+      } catch (e) {
+          console.error("Error processing old avatar URL for deletion:", e);
+          setError("Avatar updated, but could not remove old one due to a URL processing error.");
+      }
+    }
+
+    setLoading(false);
+  };
   
-  // Display a loading state if user data isn't available yet
   if (!user) {
       return <p>Loading profile...</p>;
   }
+
+  const currentAvatar = user?.user_metadata?.avatar_url;
 
   return (
     <div>
@@ -82,9 +152,21 @@ const Profile = ({ user }) => {
           <form onSubmit={handleProfileUpdate}>
             <div className="flex items-center space-x-8">
               <div className="flex-shrink-0">
-                  <div className="w-24 h-24 bg-yellow-100 rounded-full flex items-center justify-center">
-                      <img src="https://img.icons8.com/color/48/000000/lock-2.png" alt="Lock Icon"/>
+                  <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center overflow-hidden">
+                      {currentAvatar ? (
+                        <img src={currentAvatar} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                      )}
                   </div>
+                  {isEditing && (
+                    <div className="mt-2 text-sm">
+                      <label htmlFor="avatar-upload" className="font-medium text-blue-600 hover:text-blue-500 cursor-pointer">
+                        Ganti Foto
+                      </label>
+                      <input id="avatar-upload" type="file" onChange={handleAvatarUpload} disabled={loading} className="hidden"/>
+                    </div>
+                  )}
               </div>
               <div className="grid grid-cols-2 gap-x-12 gap-y-4 text-gray-600 flex-grow">
                 <div>
@@ -92,7 +174,7 @@ const Profile = ({ user }) => {
                   {isEditing ? (
                     <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} className="w-full border-gray-300 rounded-md shadow-sm p-2 mt-1"/>
                   ) : (
-                    <p className="font-semibold">{fullName || 'Not set'}</p>
+                    <p className="font-semibold">{user.user_metadata?.full_name || 'Not set'}</p>
                   )}
                 </div>
                  <div>
@@ -100,19 +182,19 @@ const Profile = ({ user }) => {
                    {isEditing ? (
                     <input type="text" value={signature} onChange={(e) => setSignature(e.target.value)} className="w-full border-gray-300 rounded-md shadow-sm p-2 mt-1"/>
                   ) : (
-                    <p className="font-semibold">{signature}</p>
+                    <p className="font-semibold">{user.user_metadata?.signature || 'Not set'}</p>
                   )}
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-500">Email</label>
-                  <p className="font-semibold">{user.email}</p> {/* Email is not editable here */}
+                  <p className="font-semibold">{user.email}</p>
                 </div>
                  <div>
                   <label className="text-sm font-medium text-gray-500">Nomor WhatsApp</label>
                    {isEditing ? (
                     <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full border-gray-300 rounded-md shadow-sm p-2 mt-1"/>
                   ) : (
-                    <p className="font-semibold">{phone}</p>
+                    <p className="font-semibold">{user.user_metadata?.phone || 'Not set'}</p>
                   )}
                 </div>
               </div>

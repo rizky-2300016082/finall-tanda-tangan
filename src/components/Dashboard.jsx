@@ -16,14 +16,19 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [documentStats, setDocumentStats] = useState({ pending: 0, signed: 0 });
   const [loadingStats, setLoadingStats] = useState(true);
+  
+  // Extract user metadata for easier access
+  const userName = user?.user_metadata?.full_name || "User";
+  const avatarUrl = user?.user_metadata?.avatar_url;
 
   useEffect(() => {
     if (activeView === 'documents') {
       fetchDocumentStats();
     }
-  }, [activeView]);
+  }, [activeView, user]);
 
   const fetchDocumentStats = async () => {
+    if (!user) return;
     try {
       setLoadingStats(true);
       const { data, error } = await supabase
@@ -97,8 +102,6 @@ const Dashboard = () => {
 
   // Sidebar component defined internally
   const Sidebar = () => {
-      const userName = user?.user_metadata?.full_name || "User";
-      
       const navLink = (view, icon, text) => (
         <a href="#" 
            onClick={(e) => { e.preventDefault(); setActiveView(view); }}
@@ -113,7 +116,11 @@ const Dashboard = () => {
             <div className="mb-10">
               <h1 className="text-3xl font-bold text-green-600 mb-6">Signature</h1>
               <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
-                <UserCircle size={40} className="text-gray-400" />
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt={userName} className="w-10 h-10 rounded-full" />
+                ) : (
+                  <UserCircle size={40} className="text-gray-400" />
+                )}
                 <div>
                   <p className="font-semibold text-gray-800">{userName}</p>
                   <span className="text-xs font-medium text-green-600 bg-green-100 px-2 py-0.5 rounded-full"></span>
@@ -195,9 +202,13 @@ const Dashboard = () => {
               {uploading ? 'Uploading...' : 'Upload Dokumen'}
               <input type="file" accept=".pdf" onChange={handleFileUpload} disabled={uploading} className="hidden" />
             </label>
-             <div className="p-2 rounded-full bg-yellow-100">
-                <UserCircle size={28} className="text-yellow-500" />
-             </div>
+             {avatarUrl ? (
+                <img src={avatarUrl} alt={userName} className="w-9 h-9 rounded-full" />
+              ) : (
+                <div className="p-2 rounded-full bg-yellow-100">
+                   <UserCircle size={28} className="text-yellow-500" />
+                </div>
+              )}
           </div>
         </header>
         <main className="flex-grow p-8">
